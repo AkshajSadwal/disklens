@@ -25,7 +25,7 @@ export default function DeleteDialog({ items, onClose, onComplete }) {
 
   async function handleDelete() {
     if (!selectedItems.length) {
-      setError("Select at least one file.");
+      setError("Select at least one item.");
       return;
     }
     if (mode === "permanent" && !confirmedPermanent) {
@@ -83,25 +83,25 @@ export default function DeleteDialog({ items, onClose, onComplete }) {
         <div className="dl-delete-modes">
           <button className={`dl-delete-mode ${mode === "recycle" ? "active" : ""}`} onClick={() => { setMode("recycle"); setConfirmedPermanent(false); setError(""); }} disabled={deleting}>
             <strong>Move to Recycle Bin</strong>
-            <span>Recoverable from Windows Recycle Bin.</span>
+            <span>Recoverable from the Windows Recycle Bin.</span>
           </button>
           <button className={`dl-delete-mode permanent ${mode === "permanent" ? "active" : ""}`} onClick={() => { setMode("permanent"); setError(""); }} disabled={deleting}>
             <strong>Delete permanently</strong>
-            <span>Removes the selected files directly. This cannot be undone.</span>
+            <span>Removes the selected item(s) directly. This cannot be undone.</span>
           </button>
         </div>
 
         {mode === "permanent" && (
           <label className="dl-delete-confirm">
             <input type="checkbox" checked={confirmedPermanent} onChange={(event) => { setConfirmedPermanent(event.target.checked); setError(""); }} disabled={deleting} />
-            <span>I understand that the selected file(s) will be permanently deleted and Windows Recycle Bin will not be used.</span>
+            <span>I understand that the selected item(s) will be permanently deleted and Windows Recycle Bin will not be used.</span>
           </label>
         )}
 
         {error && <div className="dl-alert">{error}</div>}
 
         <div className="dl-delete-footer">
-          <div className="summary">{selectedItems.length} file(s) · {formatBytes(selectedSize)}</div>
+          <div className="summary">{selectedItems.length} item{selectedItems.length === 1 ? "" : "s"} · {formatBytes(selectedSize)}</div>
           <div className="actions">
             <button className="dl-secondary-btn" onClick={onClose} disabled={deleting}>Cancel</button>
             <button className={mode === "permanent" ? "dl-danger-btn" : "dl-primary-btn"} onClick={handleDelete} disabled={deleting || !selectedItems.length}>

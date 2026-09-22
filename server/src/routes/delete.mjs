@@ -1,4 +1,4 @@
-import { deleteFile } from "../services/deleteService.mjs";
+import { deleteItem } from "../services/deleteService.mjs";
 
 export function registerDeleteRoutes(app, db) {
   app.post("/api/delete", async (request, reply) => {
@@ -47,20 +47,24 @@ export function registerDeleteRoutes(app, db) {
         continue;
       }
 
-      if (item.type !== "file") {
+      if (item.type !== "file" && item.type !== "directory") {
         results.push({
           id,
           ok: false,
-          error: "Only regular files can be deleted by this feature.",
-          code: "NOT_A_FILE",
+          error: "Only files and folders can be deleted by this feature.",
+          code: "UNSUPPORTED_TYPE",
         });
         continue;
       }
 
       try {
-        await deleteFile(item.path, mode);
+        await deleteItem(item.path, item.type, mode);
 
-        db.prepare("DELETE FROM items WHERE id = ?").run(item.id);
+        if (item.type === "directory") {
+          db.prepare("DELETE FROM items WHERE path = ? OR path LIKE ?").run(item.path, `${item.path}\\%`);
+        } else {
+          db.prepare("DELETE FROM items WHERE id = ?").run(item.id);
+        }
 
         results.push({
           id: item.id,

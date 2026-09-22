@@ -181,7 +181,7 @@ export default function DiskLensApp() {
   }
 
   function openDeleteDialog(item) {
-    if (!item || item.type !== "file") return;
+    if (!item || !["file", "directory"].includes(item.type)) return;
     setDeleteItems([item]);
   }
 
@@ -347,7 +347,7 @@ export default function DiskLensApp() {
               <>
                 <div className="dl-detail-title">
                   <div className={`dl-item-icon large ${selectedItem.type === "directory" ? "folder" : "file"}`}>
-                    <span>{selectedItem.type === "directory" ? "📁" : "📄"}</span>
+                    <Icon name={selectedItem.type === "directory" ? "folder" : "file"} size={20} />
                   </div>
                   <div><h3>{selectedItem.name}</h3><p>{selectedItem.path}</p></div>
                 </div>
@@ -355,7 +355,10 @@ export default function DiskLensApp() {
                 <div className="dl-detail-actions">
                   <button className="dl-primary-btn" onClick={() => openInExplorer()}>{selectedItem.type === "directory" ? "Open folder" : "Open file"}</button>
                   {selectedItem.type === "directory" ? (
-                    <button className="dl-secondary-btn" onClick={() => browseFolder(selectedItem)}>Browse</button>
+                    <>
+                      <button className="dl-secondary-btn" onClick={() => browseFolder(selectedItem)}>Browse</button>
+                      <button className="dl-danger-btn" onClick={() => openDeleteDialog(selectedItem)}>Delete</button>
+                    </>
                   ) : (
                     <>
                       <button className="dl-secondary-btn" onClick={openContainingFolder}>Containing folder</button>

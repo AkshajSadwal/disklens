@@ -36,17 +36,6 @@ export default function StorageExplorerView({
           <h1>Storage</h1>
           <p>Explore your files and folders.</p>
         </div>
-        <div className="dl-root-tabs">
-          {(roots || []).map((root) => (
-            <button
-              key={root.root}
-              className={root.root === currentPath ? "is-active" : ""}
-              onClick={() => onRoot(root.root)}
-            >
-              {root.root}
-            </button>
-          ))}
-        </div>
       </div>
 
       <div className="dl-pathbar">
@@ -71,12 +60,24 @@ export default function StorageExplorerView({
 
       <div className="dl-storage-grid">
         <section className="dl-card dl-chart-card">
-          <div className="dl-card-head">
+          <div className="dl-card-head dl-storage-map-head">
             <div>
               <h2>Storage Map</h2>
               <p>Largest areas in this location.</p>
             </div>
-            <strong>{formatBytes(totalSize)}</strong>
+            <div className="dl-storage-drive-switcher" aria-label="Select drive">
+              {(roots || []).map((root) => (
+                <button
+                  key={root.root}
+                  type="button"
+                  className={root.root === currentPath ? "is-active" : ""}
+                  onClick={() => onRoot(root.root)}
+                >
+                  {root.root}
+                </button>
+              ))}
+              <strong>{formatBytes(totalSize)}</strong>
+            </div>
           </div>
           <div className="dl-chart-wrap">
             {sunburstLoading ? (

@@ -66,7 +66,8 @@ export default function HomeDashboard({
   onOpenAI,
 }) {
   const [largestFilter, setLargestFilter] = useState("all");
-  const driveMap = new Map((drives || []).map((item) => [item.root, item]));
+  const normalizeRoot = (root) =>String(root || "").replace(/[\\/]+$/, "").toUpperCase();
+  const driveMap = new Map((drives || []).map((item) => [normalizeRoot(item.root),item,]),);
   const validDrives = (drives || []).filter((drive) => Number(drive.totalBytes) > 0);
 
   const total = validDrives.reduce((sum, drive) => sum + Number(drive.totalBytes || 0), 0);
@@ -156,7 +157,7 @@ export default function HomeDashboard({
               {(roots || []).map((root) => (
                 <DriveCard
                   key={root.root}
-                  drive={driveMap.get(root.root)}
+                  drive={driveMap.get(normalizeRoot(root.root))}
                   indexed={root}
                   onOpen={onOpenRoot}
                 />
@@ -258,15 +259,15 @@ export default function HomeDashboard({
               </div>
               <div className="dl-home-activity-list">
                 <div className="dl-home-activity-row">
-                  <span className="activity-icon blue"><Icon name="storage" size={16} /></span>
+                  <span className="activity-icon blue"><Icon name="storage" size={20} /></span>
                   <div><strong>Storage index ready</strong><span>{roots?.length || 0} drive{roots?.length === 1 ? "" : "s"} available in DiskLens</span></div>
                 </div>
                 <div className="dl-home-activity-row">
-                  <span className="activity-icon red"><Icon name="file" size={16} /></span>
+                  <span className="activity-icon red"><Icon name="file" size={20} /></span>
                   <div><strong>Largest item found</strong><span>{biggest ? `${biggest.name} · ${formatBytes(biggest.size)}` : "No large items yet"}</span></div>
                 </div>
                 <div className="dl-home-activity-row">
-                  <span className="activity-icon purple"><Icon name="sparkles" size={16} /></span>
+                  <span className="activity-icon purple"><Icon name="sparkles" size={20} /></span>
                   <div><strong>AI Storage Advisor</strong><span>Ready to review your biggest storage items</span></div>
                 </div>
               </div>
@@ -279,17 +280,17 @@ export default function HomeDashboard({
               </div>
               <div className="dl-home-tips">
                 <button onClick={onOpenPrograms}>
-                  <span className="tip-icon green"><Icon name="programs" size={16} /></span>
+                  <span className="tip-icon green"><Icon name="programs" size={20} /></span>
                   <div><strong>Review unused programs</strong><span>Use Programs & Cleanup to inspect leftovers.</span></div>
                   <Icon name="chevronRight" size={15} />
                 </button>
                 <button onClick={onOpenAI}>
-                  <span className="tip-icon red"><Icon name="sparkles" size={16} /></span>
+                  <span className="tip-icon red"><Icon name="sparkles" size={20} /></span>
                   <div><strong>Ask AI about storage</strong><span>Start with your largest files or folders.</span></div>
                   <Icon name="chevronRight" size={15} />
                 </button>
                 <button onClick={() => biggest && onOpenItem(biggest)}>
-                  <span className="tip-icon blue"><Icon name="file" size={16} /></span>
+                  <span className="tip-icon blue"><Icon name="file" size={20} /></span>
                   <div><strong>Review your largest item</strong><span>{biggest ? `${biggest.name} · ${formatBytes(biggest.size)}` : "No item available"}</span></div>
                   <Icon name="chevronRight" size={15} />
                 </button>

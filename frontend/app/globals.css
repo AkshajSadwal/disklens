@@ -481,3 +481,11 @@ button { -webkit-tap-highlight-color: transparent; }
   .dl-home-table-row { grid-template-columns:28px minmax(0,1fr) auto; }
   .dl-home-item-path,.dl-home-type-badge { display:none; }
 }
+
+/* Storage drive selector moved into Storage Map for clearer context. */
+.dl-storage-map-head { align-items: flex-start; }
+.dl-storage-drive-switcher { display:flex; align-items:center; gap:5px; flex-wrap:wrap; justify-content:flex-end; }
+.dl-storage-drive-switcher button { border:1px solid var(--dl-border); background:#fff; color:#5c718e; border-radius:7px; padding:6px 9px; font-size:8px; font-weight:750; cursor:pointer; }
+.dl-storage-drive-switcher button:hover { border-color:var(--dl-blue-border); background:#fbfdff; }
+.dl-storage-drive-switcher button.is-active { color:#fff; background:var(--dl-blue); border-color:var(--dl-blue); }
+.dl-storage-drive-switcher strong { margin-left:5px; color:#1f3f70; font-size:12px; white-space:nowrap; }
