@@ -191,13 +191,30 @@ button { -webkit-tap-highlight-color: transparent; }
 .dl-program-head p { margin: 0; color: var(--dl-muted); font-size: 8px; word-break: break-all; }
 .dl-program-summary { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 9px; }
 .dl-pill { display: inline-flex; align-items: center; border-radius: 999px; padding: 4px 7px; font-size: 7px; font-weight: 800; }
+.dl-pill { cursor: pointer; }
+.dl-pill.is-active { box-shadow: 0 0 0 2px rgba(47,115,237,.10); }
+.dl-pill.all { color:#49627f; background:#f1f5fa; border:1px solid var(--dl-border); }
+.dl-program-search .dl-secondary-btn { flex:0 0 auto; }
+.dl-program-sidebar::after { content:""; display:block; }
+.dl-program-content { background:#fbfdff; }
+.dl-program-head { background:#fff; }
+.dl-program-head > p { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.dl-cleanup-toolbar { background:#fff; }
+.dl-candidate-list { background:#f8fafc; }
+.dl-candidate-card { transition: border-color .15s ease, background .15s ease, box-shadow .15s ease; }
+.dl-candidate-card.is-selected { box-shadow:0 2px 8px rgba(37,99,235,.05); }
+.dl-candidate-card:hover { border-color:#d4e4fa; }
+.dl-candidate-reasons { max-height:30px; overflow:hidden; }
+.dl-cleanup-footer > div:first-child { display:flex; flex-direction:column; gap:2px; }
+.dl-cleanup-footer > div:first-child strong { font-size:9px; color:var(--dl-text); }
+.dl-cleanup-footer > div:first-child span { font-size:7px; color:var(--dl-muted); }
 .dl-pill.verified { color: #167451; background: var(--dl-green-soft); border: 1px solid #c8ead8; }
 .dl-pill.strong { color: #285f9e; background: var(--dl-blue-soft); border: 1px solid var(--dl-blue-border); }
 .dl-pill.possible { color: #9a6b08; background: #fff6df; border: 1px solid #f1dfaf; }
 .dl-cleanup-toolbar { display: flex; align-items: center; gap: 6px; padding: 9px 13px; border-bottom: 1px solid var(--dl-border); }
 .dl-selection-summary { margin-left: auto; font-size: 8px; color: var(--dl-muted); }
 .dl-candidate-list { min-height: 0; overflow-y: auto; max-height: 490px; padding: 9px 12px; }
-.dl-candidate-card { display: grid; grid-template-columns: 18px 27px minmax(0,1fr) auto; gap: 8px; align-items: start; padding: 9px; border: 1px solid var(--dl-border); border-radius: 9px; margin-bottom: 7px; background: #fff; cursor: pointer; }
+.dl-candidate-card { display: grid; grid-template-columns: 18px 27px minmax(0,1fr) 92px; gap: 8px; align-items: start; padding: 9px; border: 1px solid var(--dl-border); border-radius: 9px; margin-bottom: 7px; background: #fff; cursor: pointer; }
 .dl-candidate-card:hover { background: #fbfdff; }
 .dl-candidate-card.is-selected { background: #f6fbff; border-color: var(--dl-blue-border); }
 .dl-candidate-card input { width: 13px; height: 13px; margin-top: 3px; accent-color: var(--dl-blue); }
@@ -211,6 +228,10 @@ button { -webkit-tap-highlight-color: transparent; }
 .dl-confidence.low { background: #fff6e8; color: #9a6d13; border:1px solid #f0dfb6; }
 .dl-candidate-path { color: var(--dl-muted); font-size: 7px; margin-top: 4px; word-break: break-all; }
 .dl-candidate-reasons { color: var(--dl-muted-2); font-size: 7px; line-height: 1.4; margin-top: 4px; }
+.dl-candidate-meta { display:flex; flex-direction:column; align-items:flex-end; gap:5px; min-width:0; }
+.dl-candidate-type { padding:3px 6px; border-radius:999px; font-size:6px; font-weight:800; }
+.dl-candidate-type.file { color:#2773c6; background:#e7f3ff; }
+.dl-candidate-type.folder { color:#a56b00; background:#fff4d3; }
 .dl-candidate-size { color: #355575; font-size: 8px; white-space: nowrap; }
 .dl-cleanup-footer { margin-top: auto; padding: 10px 13px; border-top: 1px solid var(--dl-border); display:flex; align-items:center; gap:9px; }
 .dl-cleanup-footer > div:first-child { font-size: 8px; color: var(--dl-muted); }
@@ -489,3 +510,7 @@ button { -webkit-tap-highlight-color: transparent; }
 .dl-storage-drive-switcher button:hover { border-color:var(--dl-blue-border); background:#fbfdff; }
 .dl-storage-drive-switcher button.is-active { color:#fff; background:var(--dl-blue); border-color:var(--dl-blue); }
 .dl-storage-drive-switcher strong { margin-left:5px; color:#1f3f70; font-size:12px; white-space:nowrap; }
+
+/* Program cleanup refinements */
+.dl-pill.is-active { outline:2px solid rgba(47,115,237,.12); outline-offset:1px; }
+.dl-pill.all { color:#49627f; background:#f1f5fa; border:1px solid var(--dl-border); }

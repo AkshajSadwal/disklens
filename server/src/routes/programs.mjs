@@ -38,7 +38,7 @@ export function registerProgramRoutes(app, db) {
         created_at AS createdAt,
         modified_at AS modifiedAt
       FROM items
-      WHERE type = 'file'
+      WHERE type IN ('file', 'directory')
     `).all();
 
     const analysis = buildProgramCandidates(items, program);

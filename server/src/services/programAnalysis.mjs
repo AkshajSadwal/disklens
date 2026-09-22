@@ -237,7 +237,7 @@ function scoreCandidate(item, program, tokens) {
     ...item,
     confidence: score,
     category,
-    defaultSelected: category === "verified",
+    defaultSelected: category === "verified" && item.type === "file",
     reasons: [...new Set(reasons)],
   };
 }

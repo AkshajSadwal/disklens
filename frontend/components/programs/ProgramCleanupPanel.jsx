@@ -27,6 +27,7 @@ export default function ProgramCleanupPanel({ onClose, onReviewDelete, embedded 
   const [loading, setLoading] = useState(true);
   const [candidatesLoading, setCandidatesLoading] = useState(false);
   const [error, setError] = useState("");
+  const [candidateFilter, setCandidateFilter] = useState("all");
 
   useEffect(() => {
     async function loadPrograms() {
@@ -59,6 +60,7 @@ export default function ProgramCleanupPanel({ onClose, onReviewDelete, embedded 
     setSelectedIds(new Set());
     setCandidatesLoading(true);
     setError("");
+    setCandidateFilter("all");
 
     try {
       const response = await fetch(`${API}/api/programs/candidates`, {
@@ -94,7 +96,11 @@ export default function ProgramCleanupPanel({ onClose, onReviewDelete, embedded 
   }
 
   function selectAllVisible() {
-    setSelectedIds(new Set(candidates.map((item) => item.id)));
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      for (const item of visibleCandidates) next.add(item.id);
+      return next;
+    });
   }
 
   function selectNone() {
@@ -106,6 +112,20 @@ export default function ProgramCleanupPanel({ onClose, onReviewDelete, embedded 
   const verifiedCount = candidates.filter((item) => item.category === "verified").length;
   const strongCount = candidates.filter((item) => item.confidence >= 85).length;
   const possibleLeftoverCount = candidates.filter((item) => item.category !== "verified").length;
+
+  const visibleCandidates = useMemo(() => {
+    let rows = candidates;
+
+    if (candidateFilter === "verified") {
+      rows = rows.filter((item) => item.category === "verified");
+    } else if (candidateFilter === "strong") {
+      rows = rows.filter((item) => item.confidence >= 85);
+    } else if (candidateFilter === "possible") {
+      rows = rows.filter((item) => item.category !== "verified");
+    }
+
+    return rows;
+  }, [candidates, candidateFilter]);
 
   return (
     <div className={`dl-panel-root ${embedded ? "is-embedded" : ""}`}>
@@ -173,16 +193,25 @@ export default function ProgramCleanupPanel({ onClose, onReviewDelete, embedded 
                   <h2>{selectedProgram.name}</h2>
                   <p>{selectedProgram.installLocation || "No registered InstallLocation"}</p>
                   <div className="dl-program-summary">
-                    <span className="dl-pill verified">{verifiedCount} verified</span>
-                    <span className="dl-pill strong">{strongCount} strong matches</span>
-                    <span className="dl-pill possible">{possibleLeftoverCount} possible leftovers</span>
+                    <button type="button" className={`dl-pill verified ${candidateFilter === "verified" ? "is-active" : ""}`} onClick={() => setCandidateFilter("verified")}>
+                      {verifiedCount} verified
+                    </button>
+                    <button type="button" className={`dl-pill strong ${candidateFilter === "strong" ? "is-active" : ""}`} onClick={() => setCandidateFilter("strong")}>
+                      {strongCount} strong matches
+                    </button>
+                    <button type="button" className={`dl-pill possible ${candidateFilter === "possible" ? "is-active" : ""}`} onClick={() => setCandidateFilter("possible")}>
+                      {possibleLeftoverCount} possible leftovers
+                    </button>
+                    <button type="button" className={`dl-pill all ${candidateFilter === "all" ? "is-active" : ""}`} onClick={() => setCandidateFilter("all")}>
+                      All
+                    </button>
                   </div>
                 </div>
 
                 <div className="dl-cleanup-toolbar">
                   <button className="dl-secondary-btn" onClick={selectAllVisible}>Select all</button>
                   <button className="dl-secondary-btn" onClick={selectNone}>Select none</button>
-                  <div className="dl-selection-summary">{candidates.length} candidate files</div>
+                  <div className="dl-selection-summary">{visibleCandidates.length} shown · {selectedItems.length} selected</div>
                 </div>
 
                 <div className="dl-candidate-list items-scroll">
@@ -192,10 +221,16 @@ export default function ProgramCleanupPanel({ onClose, onReviewDelete, embedded 
                     <div className="dl-empty-state">
                       <div className="dl-item-icon large file" style={{ margin: "0 auto" }}><Icon name="search" size={19} /></div>
                       <h3>No matching indexed files were found.</h3>
-                      <p>Try a different program name or run a fresh scan.</p>
+                      <p>Try another program name or run a fresh scan to refresh the index.</p>
+                    </div>
+                  ) : visibleCandidates.length === 0 ? (
+                    <div className="dl-empty-state">
+                      <div className="dl-item-icon large program" style={{ margin: "0 auto" }}><Icon name="search" size={19} /></div>
+                      <h3>No candidates in this category.</h3>
+                      <p>Switch the filter above to see the other ownership matches.</p>
                     </div>
                   ) : (
-                    candidates.map((item) => {
+                    visibleCandidates.map((item) => {
                       const selected = selectedIds.has(item.id);
                       const verified = item.category === "verified";
                       return (
@@ -212,7 +247,12 @@ export default function ProgramCleanupPanel({ onClose, onReviewDelete, embedded 
                             <div className="dl-candidate-path">{item.path}</div>
                             <div className="dl-candidate-reasons">{item.reasons?.join(" · ") || "Matched by ownership evidence."}</div>
                           </div>
-                          <div className="dl-candidate-size">{formatBytes(item.size)}</div>
+                          <div className="dl-candidate-meta">
+                            <span className={`dl-candidate-type ${item.type === "directory" ? "folder" : "file"}`}>
+                              {item.type === "directory" ? "Folder" : "File"}
+                            </span>
+                            <div className="dl-candidate-size">{formatBytes(item.size)}</div>
+                          </div>
                         </label>
                       );
                     })
@@ -220,14 +260,17 @@ export default function ProgramCleanupPanel({ onClose, onReviewDelete, embedded 
                 </div>
 
                 <footer className="dl-cleanup-footer">
-                  <div>{selectedItems.length} selected · {formatBytes(selectedSize)}</div>
+                  <div>
+                    <strong>{selectedItems.length} selected</strong>
+                    <span>{formatBytes(selectedSize)} · Verified candidates are selected by default.</span>
+                  </div>
                   <div />
                   <button
                     className="dl-danger-btn"
                     onClick={() => onReviewDelete(selectedItems)}
                     disabled={!selectedItems.length}
                   >
-                    Review selected files
+                    Review selected items
                   </button>
                 </footer>
               </>
@@ -235,7 +278,7 @@ export default function ProgramCleanupPanel({ onClose, onReviewDelete, embedded 
               <div className="dl-empty-state">
                 <div className="dl-item-icon large program" style={{ margin: "0 auto" }}><Icon name="programs" size={20} /></div>
                 <h3>Select a program</h3>
-                <p>Choose an installed program or enter a name above to find possible leftovers.</p>
+                <p>Choose an installed program or enter a name above. DiskLens checks files and folders using deterministic ownership evidence.</p>
               </div>
             )}
 
