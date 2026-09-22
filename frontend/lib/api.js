@@ -1,0 +1,1 @@
+export const API = process.env.NEXT_PUBLIC_DISKLENS_API ?? "http://127.0.0.1:4000";
