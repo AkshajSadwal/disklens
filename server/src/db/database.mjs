@@ -20,6 +20,18 @@ export function createDatabase(filename = "disklens.db") {
 
     CREATE INDEX IF NOT EXISTS idx_items_scan_id
     ON items(scan_id);
+
+    CREATE TABLE IF NOT EXISTS drives (
+      root TEXT PRIMARY KEY,
+      volume_name TEXT,
+      file_system TEXT,
+      total_bytes INTEGER NOT NULL,
+      free_bytes INTEGER NOT NULL,
+      used_bytes INTEGER NOT NULL,
+      drive_type INTEGER,
+      volume_serial_number TEXT,
+      updated_at TEXT NOT NULL
+    );
   `);
 
   return db;

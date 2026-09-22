@@ -3,6 +3,7 @@ import path from "node:path";
 import { SERVER } from "./config.mjs";
 import { getDriveMetadata } from "./driveMetadata.mjs";
 import { scanRoot } from "./scanner.mjs";
+import { uploadDriveMetadata } from "./uploader.mjs";
 
 const ROOTS = process.argv.slice(2);
 
@@ -27,6 +28,12 @@ for (const inputRoot of ROOTS) {
     console.log(`Free: ${drive.freeBytes} bytes`);
     console.log(`Used: ${drive.usedBytes} bytes`);
     console.log(`Filesystem: ${drive.fileSystem}`);
+
+    try {
+      await uploadDriveMetadata({ server: SERVER, drive });
+    } catch (uploadError) {
+      console.warn(`Could not upload drive metadata for ${root}:`, uploadError.message);
+    }
   } catch (error) {
     console.warn(
       `Could not read drive metadata for ${root}:`,

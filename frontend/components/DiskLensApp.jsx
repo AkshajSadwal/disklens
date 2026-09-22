@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { API } from "../lib/api";
+import Icon from "./common/Icon";
 import Detail from "./Detail";
 import DeleteDialog from "./files/DeleteDialog";
 import ProgramCleanupPanel from "./programs/ProgramCleanupPanel";

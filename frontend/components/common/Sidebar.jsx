@@ -13,10 +13,10 @@ export default function Sidebar({ active, onNavigate }) {
   return (
     <aside className="dl-sidebar">
       <div className="dl-brand">
-        <div className="dl-brand-mark">A</div>
+        <div className="dl-brand-mark">D</div>
         <div>
           <div className="dl-brand-name">DiskLens</div>
-          <div className="dl-brand-subtitle">Storage intelligence</div>
+          <div className="dl-brand-subtitle">Storage Intelligence</div>
         </div>
       </div>
 

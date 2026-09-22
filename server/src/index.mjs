@@ -12,6 +12,7 @@ import { registerExplorerRoutes } from "./routes/explorer.mjs";
 import { registerDeleteRoutes } from "./routes/delete.mjs";
 import { registerProgramRoutes } from "./routes/programs.mjs";
 import { registerAIRoutes } from "./routes/ai.mjs";
+import { registerDriveRoutes } from "./routes/drives.mjs";
 
 const app = Fastify({ logger: true });
 
@@ -25,6 +26,7 @@ registerHealthRoutes(app);
 registerScanRoutes(app, db);
 registerItemRoutes(app, db);
 registerRootRoutes(app, db);
+registerDriveRoutes(app, db);
 registerStorageRoutes(app, db);
 registerFolderRoutes(app, db);
 registerExplorerRoutes(app, db);

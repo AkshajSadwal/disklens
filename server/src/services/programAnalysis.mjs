@@ -19,6 +19,10 @@ function normalize(value) {
     .trim();
 }
 
+function normalizeCompact(value) {
+  return normalize(value).replace(/\s+/g, "");
+}
+
 function tokensFor(value) {
   return [...new Set(
     normalize(value)
@@ -125,19 +129,30 @@ function scoreCandidate(item, program, tokens) {
   }
 
   if (normalizedProgram) {
+    const compactItemPath = normalizeCompact(itemPath);
+    const compactProgram = normalizeCompact(program.name);
+
     const exactNameSegment = itemSegments.includes(normalizedProgram);
-    if (exactNameSegment) {
+    const compactNameMatch = compactProgram && compactItemPath.includes(compactProgram);
+
+    if (exactNameSegment || compactNameMatch) {
       score += 42;
-      signals.push("program-name-path-segment");
-      reasons.push("A path segment exactly matches the normalized program name.");
+      signals.push("program-name-path-match");
+      reasons.push("The indexed path contains the program's normalized name.");
     } else {
       const matchedTokens = tokens.filter((token) =>
-        itemSegments.some((segment) => segment === token || segment.includes(` ${token} `) || segment.startsWith(`${token} `) || segment.endsWith(` ${token}`)),
+        itemSegments.some((segment) =>
+          segment === token ||
+          segment.includes(` ${token} `) ||
+          segment.startsWith(`${token} `) ||
+          segment.endsWith(` ${token}`) ||
+          segment.includes(token),
+        ),
       );
 
       if (matchedTokens.length) {
         const ratio = matchedTokens.length / Math.max(tokens.length, 1);
-        score += ratio >= 0.75 ? 34 : ratio >= 0.5 ? 25 : 14;
+        score += ratio >= 0.75 ? 36 : ratio >= 0.5 ? 28 : 16;
         signals.push("program-token-path-match");
         reasons.push(`Path matches ${matchedTokens.length} of ${tokens.length} distinctive program name token(s).`);
       }
@@ -163,6 +178,15 @@ function scoreCandidate(item, program, tokens) {
       score += 8;
       signals.push("single-token-file-name-match");
       reasons.push("Filename contains one distinctive program-name token.");
+    }
+  }
+
+  if (normalizedProgram) {
+    const compactTokens = tokens.filter((token) => lowerItemPath.includes(token));
+    if (compactTokens.length && !signals.includes("program-token-path-match") && !signals.includes("program-name-path-match")) {
+      score += 12;
+      signals.push("program-substring-path-match");
+      reasons.push("A distinctive program name token appears in the indexed path.");
     }
   }
 
