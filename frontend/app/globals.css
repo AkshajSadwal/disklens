@@ -510,3 +510,20 @@ button { -webkit-tap-highlight-color: transparent; }
 .dl-home-quick button { min-height: 48px; }
 .dl-home-activity-row strong, .dl-home-tips strong { font-size: 10px; }
 .dl-home-activity-row span, .dl-home-tips span { font-size: 9px; }
+.dl-home-activity-row .activity-icon,
+.dl-home-tips .tip-icon {
+  display: grid;
+  place-items: center;
+  justify-content: center;
+  align-items: center;
+  line-height: 0;
+  flex-shrink: 0;
+}
+
+.dl-home-activity-row .activity-icon svg,
+.dl-home-tips .tip-icon svg {
+  display: block;
+  width: 20px;
+  height: 20px;
+  margin: 0;
+}

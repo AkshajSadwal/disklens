@@ -1,18 +1,25 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Icon from "./common/Icon";
 import { formatBytes } from "../lib/formatters";
 
 function DriveCard({ drive, indexed, onOpen }) {
-  const hasActual = Number.isFinite(Number(drive?.totalBytes)) && Number(drive.totalBytes) > 0;
+  const hasActual =
+    Number.isFinite(Number(drive?.totalBytes)) && Number(drive.totalBytes) > 0;
   const total = hasActual ? Number(drive.totalBytes) : 0;
   const used = hasActual ? Number(drive.usedBytes || 0) : 0;
   const free = hasActual ? Number(drive.freeBytes || 0) : 0;
-  const percent = total > 0 ? Math.min(100, Math.max(0, (used / total) * 100)) : 0;
+  const percent =
+    total > 0 ? Math.min(100, Math.max(0, (used / total) * 100)) : 0;
 
   return (
-    <button className="dl-home-drive" onClick={() => onOpen(indexed?.root || drive?.root)}>
+    <button
+      className="dl-home-drive"
+      onClick={() => onOpen(indexed?.root || drive?.root)}
+    >
       <div className="dl-home-drive-top">
-        <div className="dl-home-drive-icon"><Icon name="drive" size={19} /></div>
+        <div className="dl-home-drive-icon">
+          <Icon name="drive" size={19} />
+        </div>
         <div className="dl-home-drive-name">
           <strong>{indexed?.root || drive?.root}</strong>
           <span>{drive?.volumeName || "Local Disk"}</span>
@@ -27,7 +34,9 @@ function DriveCard({ drive, indexed, onOpen }) {
       {hasActual ? (
         <>
           <div className="dl-home-drive-stats">
-            <span>{formatBytes(used)} / {formatBytes(total)}</span>
+            <span>
+              {formatBytes(used)} / {formatBytes(total)}
+            </span>
             <strong>{percent.toFixed(0)}%</strong>
           </div>
           <div className="dl-home-drive-free">{formatBytes(free)} free</div>
@@ -40,7 +49,8 @@ function DriveCard({ drive, indexed, onOpen }) {
 }
 
 function StorageRing({ used, total }) {
-  const percent = total > 0 ? Math.min(100, Math.max(0, (used / total) * 100)) : 0;
+  const percent =
+    total > 0 ? Math.min(100, Math.max(0, (used / total) * 100)) : 0;
   return (
     <div
       className="dl-home-storage-ring"
@@ -60,24 +70,109 @@ export default function HomeDashboard({
   drives,
   roots,
   largestItems,
-  largestFolders,
   onOpenRoot,
   onOpenItem,
   onOpenPrograms,
   onOpenAI,
 }) {
   const [largestFilter, setLargestFilter] = useState("all");
-  const normalizeRoot = (root) =>String(root || "").replace(/[\\/]+$/, "").toUpperCase();
-  const driveMap = new Map((drives || []).map((item) => [normalizeRoot(item.root),item,]),);
-  const validDrives = (drives || []).filter((drive) => Number(drive.totalBytes) > 0);
+  const [largestFolders, setLargestFolders] = useState([]);
+  const [foldersLoading, setFoldersLoading] = useState(false);
 
-  const total = validDrives.reduce((sum, drive) => sum + Number(drive.totalBytes || 0), 0);
-  const used = validDrives.reduce((sum, drive) => sum + Number(drive.usedBytes || 0), 0);
-  const free = validDrives.reduce((sum, drive) => sum + Number(drive.freeBytes || 0), 0);
+  const driveMap = new Map(
+    (drives || []).map((item) => [
+      String(item.root || "")
+        .replace(/[\\/]+$/, "")
+        .toUpperCase(),
+      item,
+    ]),
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadLargestFolders() {
+      if (!roots?.length) {
+        setLargestFolders([]);
+        return;
+      }
+
+      setFoldersLoading(true);
+
+      try {
+        const responses = await Promise.all(
+          roots.map(async (root) => {
+            const response = await fetch(
+              `http://127.0.0.1:4000/api/folders?path=${encodeURIComponent(
+                root.root,
+              )}`,
+            );
+
+            if (!response.ok) {
+              throw new Error(`HTTP ${response.status}`);
+            }
+
+            return response.json();
+          }),
+        );
+
+        if (!cancelled) {
+          const folders = responses
+            .flat()
+            .filter(
+              (item) =>
+                item?.type === "directory" &&
+                item?.id &&
+                Number(item?.size) > 0,
+            )
+            .sort((a, b) => Number(b.size || 0) - Number(a.size || 0));
+
+          setLargestFolders(folders);
+        }
+      } catch {
+        if (!cancelled) {
+          setLargestFolders([]);
+        }
+      } finally {
+        if (!cancelled) {
+          setFoldersLoading(false);
+        }
+      }
+    }
+
+    loadLargestFolders();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [roots]);
+  const normalizeRoot = (root) =>
+    String(root || "")
+      .replace(/[\\/]+$/, "")
+      .toUpperCase();
+  const validDrives = (drives || []).filter(
+    (drive) => Number(drive.totalBytes) > 0,
+  );
+
+  const total = validDrives.reduce(
+    (sum, drive) => sum + Number(drive.totalBytes || 0),
+    0,
+  );
+  const used = validDrives.reduce(
+    (sum, drive) => sum + Number(drive.usedBytes || 0),
+    0,
+  );
+  const free = validDrives.reduce(
+    (sum, drive) => sum + Number(drive.freeBytes || 0),
+    0,
+  );
   const hasDriveMetadata = validDrives.length > 0;
 
   const fileItems = (largestItems || []).filter((item) => item.type === "file");
-  const folderItems = (largestFolders || []).filter((item) => item.type === "directory");
+  const folderItems =
+    largestFolders.length > 0
+      ? largestFolders
+      : (largestItems || []).filter((item) => item.type === "directory");
   const biggest = largestItems?.[0];
   const filteredLargest =
     largestFilter === "files"
@@ -86,7 +181,7 @@ export default function HomeDashboard({
         ? folderItems
         : largestFilter === "programs"
           ? []
-          : (largestItems || []);
+          : largestItems || [];
 
   return (
     <div className="dl-home">
@@ -98,7 +193,10 @@ export default function HomeDashboard({
         </div>
 
         <div className="dl-home-scan-wrap">
-          <button className="dl-home-scan" onClick={() => onOpenRoot(roots?.[0]?.root)}>
+          <button
+            className="dl-home-scan"
+            onClick={() => onOpenRoot(roots?.[0]?.root)}
+          >
             <Icon name="scan" size={18} />
             Scan Now
           </button>
@@ -106,7 +204,10 @@ export default function HomeDashboard({
             <span className="dl-home-live-dot" />
             <div>
               <strong>Storage index</strong>
-              <span>{roots?.length || 0} drive{roots?.length === 1 ? "" : "s"} indexed</span>
+              <span>
+                {roots?.length || 0} drive{roots?.length === 1 ? "" : "s"}{" "}
+                indexed
+              </span>
             </div>
           </div>
         </div>
@@ -116,29 +217,57 @@ export default function HomeDashboard({
         <div className="dl-home-main-column">
           <section className="dl-home-stat-grid">
             <div className="dl-home-stat-card blue">
-              <div className="dl-home-stat-icon"><Icon name="storage" size={21} /></div>
+              <div className="dl-home-stat-icon">
+                <Icon name="storage" size={21} />
+              </div>
               <div>
                 <span>Total Storage</span>
                 <strong>{hasDriveMetadata ? formatBytes(total) : "—"}</strong>
-                <small>{hasDriveMetadata ? "All indexed drives" : "Drive capacity not available"}</small>
+                <small>
+                  {hasDriveMetadata
+                    ? "All indexed drives"
+                    : "Drive capacity not available"}
+                </small>
               </div>
             </div>
 
             <div className="dl-home-stat-card red">
-              <div className="dl-home-stat-icon"><div className="dl-home-mini-ring used" style={{ background: `conic-gradient(#e64c63 0 ${total ? (used / total) * 100 : 0}%, #f7dce2 0 100%)` }} /></div>
+              <div className="dl-home-stat-icon">
+                <div
+                  className="dl-home-mini-ring used"
+                  style={{
+                    background: `conic-gradient(#e64c63 0 ${total ? (used / total) * 100 : 0}%, #f7dce2 0 100%)`,
+                  }}
+                />
+              </div>
               <div>
                 <span>Used</span>
                 <strong>{hasDriveMetadata ? formatBytes(used) : "—"}</strong>
-                <small>{hasDriveMetadata && total ? `${((used / total) * 100).toFixed(0)}% of total` : "Waiting for drive data"}</small>
+                <small>
+                  {hasDriveMetadata && total
+                    ? `${((used / total) * 100).toFixed(0)}% of total`
+                    : "Waiting for drive data"}
+                </small>
               </div>
             </div>
 
             <div className="dl-home-stat-card green">
-              <div className="dl-home-stat-icon"><div className="dl-home-mini-ring free" style={{ background: `conic-gradient(#19ad6b 0 ${total ? (free / total) * 100 : 0}%, #dff2e8 0 100%)` }} /></div>
+              <div className="dl-home-stat-icon">
+                <div
+                  className="dl-home-mini-ring free"
+                  style={{
+                    background: `conic-gradient(#19ad6b 0 ${total ? (free / total) * 100 : 0}%, #dff2e8 0 100%)`,
+                  }}
+                />
+              </div>
               <div>
                 <span>Free</span>
                 <strong>{hasDriveMetadata ? formatBytes(free) : "—"}</strong>
-                <small>{hasDriveMetadata && total ? `${((free / total) * 100).toFixed(0)}% available` : "Waiting for drive data"}</small>
+                <small>
+                  {hasDriveMetadata && total
+                    ? `${((free / total) * 100).toFixed(0)}% available`
+                    : "Waiting for drive data"}
+                </small>
               </div>
             </div>
           </section>
@@ -149,7 +278,10 @@ export default function HomeDashboard({
                 <h2>Drives</h2>
                 <p>Actual capacity from Windows.</p>
               </div>
-              <button className="dl-home-link" onClick={() => onOpenRoot(roots?.[0]?.root)}>
+              <button
+                className="dl-home-link"
+                onClick={() => onOpenRoot(roots?.[0]?.root)}
+              >
                 View All Drives <Icon name="chevronRight" size={15} />
               </button>
             </div>
@@ -172,13 +304,21 @@ export default function HomeDashboard({
                 <h2>Largest Items</h2>
                 <p>The biggest files and folders in your index.</p>
               </div>
-              <button className="dl-home-link" onClick={() => onOpenRoot(roots?.[0]?.root)}>
+              <button
+                className="dl-home-link"
+                onClick={() => onOpenRoot(roots?.[0]?.root)}
+              >
                 View All <Icon name="chevronRight" size={15} />
               </button>
             </div>
 
             <div className="dl-home-tabs" role="tablist">
-              {[["all", "All"], ["files", "Files"], ["folders", "Folders"], ["programs", "Programs"]].map(([value, label]) => (
+              {[
+                ["all", "All"],
+                ["files", "Files"],
+                ["folders", "Folders"],
+                ["programs", "Programs"],
+              ].map(([value, label]) => (
                 <button
                   key={value}
                   className={largestFilter === value ? "is-active" : ""}
@@ -195,33 +335,57 @@ export default function HomeDashboard({
 
             <div className="dl-home-table">
               <div className="dl-home-table-head">
-                <span>#</span><span>Name</span><span>Path</span><span>Size</span><span>Type</span><span />
+                <span>#</span>
+                <span>Name</span>
+                <span>Path</span>
+                <span>Size</span>
+                <span>Type</span>
+                <span />
               </div>
               {filteredLargest.slice(0, 5).map((item, index) => (
-                <button className="dl-home-table-row" key={item.id || item.path} onClick={() => onOpenItem(item)}>
+                <button
+                  className="dl-home-table-row"
+                  key={item.id || item.path}
+                  onClick={() => onOpenItem(item)}
+                >
                   <span className="dl-home-rank">{index + 1}</span>
                   <span className="dl-home-item-name">
-                    <span className={`dl-home-type-icon ${item.type === "directory" ? "folder" : "file"}`}>
-                      <Icon name={item.type === "directory" ? "folder" : "file"} size={16} />
+                    <span
+                      className={`dl-home-type-icon ${item.type === "directory" ? "folder" : "file"}`}
+                    >
+                      <Icon
+                        name={item.type === "directory" ? "folder" : "file"}
+                        size={16}
+                      />
                     </span>
                     <strong>{item.name}</strong>
                   </span>
                   <span className="dl-home-item-path">{item.path}</span>
-                  <span className="dl-home-item-size">{formatBytes(item.size)}</span>
-                  <span className={`dl-home-type-badge ${item.type === "directory" ? "folder" : "file"}`}>
+                  <span className="dl-home-item-size">
+                    {formatBytes(item.size)}
+                  </span>
+                  <span
+                    className={`dl-home-type-badge ${item.type === "directory" ? "folder" : "file"}`}
+                  >
                     {item.type === "directory" ? "Folder" : "File"}
                   </span>
                   <Icon name="more" size={15} />
                 </button>
               ))}
-              {!filteredLargest.length && (largestFilter === "programs" ? (
-                <div className="dl-home-empty">Open Programs & Cleanup to review installed programs.</div>
-              ) : (
-                <div className="dl-home-empty">No indexed items in this category.</div>
-              ))}
+              {!filteredLargest.length &&
+                (largestFilter === "programs" ? (
+                  <div className="dl-home-empty">
+                    Open Programs & Cleanup to review installed programs.
+                  </div>
+                ) : largestFilter === "folders" && foldersLoading ? (
+                  <div className="dl-home-empty">Loading indexed folders…</div>
+                ) : (
+                  <div className="dl-home-empty">
+                    No indexed items in this category.
+                  </div>
+                ))}
             </div>
           </section>
-
         </div>
 
         <aside className="dl-home-side-column">
@@ -229,75 +393,173 @@ export default function HomeDashboard({
             <span>“</span>
             <p>A cleaner drive leads to a clearer mind.</p>
             <div className="dl-home-quote-art" aria-hidden="true">
-              <i /><b /><em /><strong />
+              <i />
+              <b />
+              <em />
+              <strong />
             </div>
           </section>
 
           <section className="dl-home-panel dl-home-quick">
-            <div className="dl-home-panel-head"><div><h2>Quick Actions</h2></div></div>
-            <button onClick={() => onOpenRoot(roots?.[0]?.root)}><span><Icon name="scan" size={17} /></span><strong>Scan Now</strong><Icon name="chevronRight" size={15} /></button>
-            <button onClick={onOpenAI}><span><Icon name="sparkles" size={17} /></span><strong>AI Storage Advisor</strong><Icon name="chevronRight" size={15} /></button>
-            <button onClick={onOpenPrograms}><span><Icon name="programs" size={17} /></span><strong>Programs & Cleanup</strong><Icon name="chevronRight" size={15} /></button>
+            <div className="dl-home-panel-head">
+              <div>
+                <h2>Quick Actions</h2>
+              </div>
+            </div>
+            <button onClick={() => onOpenRoot(roots?.[0]?.root)}>
+              <span>
+                <Icon name="scan" size={17} />
+              </span>
+              <strong>Scan Now</strong>
+              <Icon name="chevronRight" size={15} />
+            </button>
+            <button onClick={onOpenAI}>
+              <span>
+                <Icon name="sparkles" size={17} />
+              </span>
+              <strong>AI Storage Advisor</strong>
+              <Icon name="chevronRight" size={15} />
+            </button>
+            <button onClick={onOpenPrograms}>
+              <span>
+                <Icon name="programs" size={17} />
+              </span>
+              <strong>Programs & Cleanup</strong>
+              <Icon name="chevronRight" size={15} />
+            </button>
           </section>
 
           <section className="dl-home-panel dl-home-breakdown">
-            <div className="dl-home-panel-head"><div><h2>Storage Breakdown</h2></div></div>
+            <div className="dl-home-panel-head">
+              <div>
+                <h2>Storage Breakdown</h2>
+              </div>
+            </div>
             <div className="dl-home-breakdown-body">
               <StorageRing used={used} total={total} />
               <div className="dl-home-breakdown-legend">
-                <div><span className="legend-dot used" /><div><strong>Used</strong><span>{hasDriveMetadata ? formatBytes(used) : "—"} {hasDriveMetadata && total ? `(${((used / total) * 100).toFixed(0)}%)` : ""}</span></div></div>
-                <div><span className="legend-dot free" /><div><strong>Free</strong><span>{hasDriveMetadata ? formatBytes(free) : "—"} {hasDriveMetadata && total ? `(${((free / total) * 100).toFixed(0)}%)` : ""}</span></div></div>
+                <div>
+                  <span className="legend-dot used" />
+                  <div>
+                    <strong>Used</strong>
+                    <span>
+                      {hasDriveMetadata ? formatBytes(used) : "—"}{" "}
+                      {hasDriveMetadata && total
+                        ? `(${((used / total) * 100).toFixed(0)}%)`
+                        : ""}
+                    </span>
+                  </div>
+                </div>
+                <div>
+                  <span className="legend-dot free" />
+                  <div>
+                    <strong>Free</strong>
+                    <span>
+                      {hasDriveMetadata ? formatBytes(free) : "—"}{" "}
+                      {hasDriveMetadata && total
+                        ? `(${((free / total) * 100).toFixed(0)}%)`
+                        : ""}
+                    </span>
+                  </div>
+                </div>
               </div>
             </div>
           </section>
         </aside>
 
         <div className="dl-home-bottom-grid">
-            <section className="dl-home-panel">
-              <div className="dl-home-panel-head">
-                <div><h2>Recent Activity</h2></div>
+          <section className="dl-home-panel">
+            <div className="dl-home-panel-head">
+              <div>
+                <h2>Recent Activity</h2>
               </div>
-              <div className="dl-home-activity-list">
-                <div className="dl-home-activity-row">
-                  <span className="activity-icon blue"><Icon name="storage" size={20} /></span>
-                  <div><strong>Storage index ready</strong><span>{roots?.length || 0} drive{roots?.length === 1 ? "" : "s"} available in DiskLens</span></div>
-                </div>
-                <div className="dl-home-activity-row">
-                  <span className="activity-icon red"><Icon name="file" size={20} /></span>
-                  <div><strong>Largest item found</strong><span>{biggest ? `${biggest.name} · ${formatBytes(biggest.size)}` : "No large items yet"}</span></div>
-                </div>
-                <div className="dl-home-activity-row">
-                  <span className="activity-icon purple"><Icon name="sparkles" size={20} /></span>
-                  <div><strong>AI Storage Advisor</strong><span>Ready to review your biggest storage items</span></div>
+            </div>
+            <div className="dl-home-activity-list">
+              <div className="dl-home-activity-row">
+                <span className="activity-icon blue">
+                  <Icon name="storage" size={20} />
+                </span>
+                <div>
+                  <strong>Storage index ready</strong>
+                  <span>
+                    {roots?.length || 0} drive{roots?.length === 1 ? "" : "s"}{" "}
+                    available in DiskLens
+                  </span>
                 </div>
               </div>
-            </section>
+              <div className="dl-home-activity-row">
+                <span className="activity-icon red">
+                  <Icon name="file" size={20} />
+                </span>
+                <div>
+                  <strong>Largest item found</strong>
+                  <span>
+                    {biggest
+                      ? `${biggest.name} · ${formatBytes(biggest.size)}`
+                      : "No large items yet"}
+                  </span>
+                </div>
+              </div>
+              <div className="dl-home-activity-row">
+                <span className="activity-icon purple">
+                  <Icon name="sparkles" size={20} />
+                </span>
+                <div>
+                  <strong>AI Storage Advisor</strong>
+                  <span>Ready to review your biggest storage items</span>
+                </div>
+              </div>
+            </div>
+          </section>
 
-            <section className="dl-home-panel">
-              <div className="dl-home-panel-head">
-                <div><h2>Tips for You</h2></div>
-                <button className="dl-home-link" onClick={onOpenAI}>See AI advice <Icon name="chevronRight" size={15} /></button>
+          <section className="dl-home-panel">
+            <div className="dl-home-panel-head">
+              <div>
+                <h2>Tips for You</h2>
               </div>
-              <div className="dl-home-tips">
-                <button onClick={onOpenPrograms}>
-                  <span className="tip-icon green"><Icon name="programs" size={20} /></span>
-                  <div><strong>Review unused programs</strong><span>Use Programs & Cleanup to inspect leftovers.</span></div>
-                  <Icon name="chevronRight" size={15} />
-                </button>
-                <button onClick={onOpenAI}>
-                  <span className="tip-icon red"><Icon name="sparkles" size={20} /></span>
-                  <div><strong>Ask AI about storage</strong><span>Start with your largest files or folders.</span></div>
-                  <Icon name="chevronRight" size={15} />
-                </button>
-                <button onClick={() => biggest && onOpenItem(biggest)}>
-                  <span className="tip-icon blue"><Icon name="file" size={20} /></span>
-                  <div><strong>Review your largest item</strong><span>{biggest ? `${biggest.name} · ${formatBytes(biggest.size)}` : "No item available"}</span></div>
-                  <Icon name="chevronRight" size={15} />
-                </button>
-              </div>
-            </section>
-          </div>
+              <button className="dl-home-link" onClick={onOpenAI}>
+                See AI advice <Icon name="chevronRight" size={15} />
+              </button>
+            </div>
+            <div className="dl-home-tips">
+              <button onClick={onOpenPrograms}>
+                <span className="tip-icon green">
+                  <Icon name="programs" size={20} />
+                </span>
+                <div>
+                  <strong>Review unused programs</strong>
+                  <span>Use Programs & Cleanup to inspect leftovers.</span>
+                </div>
+                <Icon name="chevronRight" size={15} />
+              </button>
+              <button onClick={onOpenAI}>
+                <span className="tip-icon red">
+                  <Icon name="sparkles" size={20} />
+                </span>
+                <div>
+                  <strong>Ask AI about storage</strong>
+                  <span>Start with your largest files or folders.</span>
+                </div>
+                <Icon name="chevronRight" size={15} />
+              </button>
+              <button onClick={() => biggest && onOpenItem(biggest)}>
+                <span className="tip-icon blue">
+                  <Icon name="file" size={20} />
+                </span>
+                <div>
+                  <strong>Review your largest item</strong>
+                  <span>
+                    {biggest
+                      ? `${biggest.name} · ${formatBytes(biggest.size)}`
+                      : "No item available"}
+                  </span>
+                </div>
+                <Icon name="chevronRight" size={15} />
+              </button>
+            </div>
+          </section>
         </div>
       </div>
+    </div>
   );
 }
