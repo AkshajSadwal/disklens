@@ -18,6 +18,7 @@ export default function DiskLensApp() {
   const [roots, setRoots] = useState([]);
   const [drives, setDrives] = useState([]);
   const [largestItems, setLargestItems] = useState([]);
+  const [largestFolders, setLargestFolders] = useState([]);
   const [currentPath, setCurrentPath] = useState("");
   const [folderItems, setFolderItems] = useState([]);
   const [backStack, setBackStack] = useState([]);
@@ -39,10 +40,11 @@ export default function DiskLensApp() {
   useEffect(() => {
     async function loadOverview() {
       try {
-        const [rootsResponse, drivesResponse, largestResponse] = await Promise.all([
+        const [rootsResponse, drivesResponse, largestResponse, largestFoldersResponse] = await Promise.all([
           fetch(`${API}/api/roots`),
           fetch(`${API}/api/drives`).catch(() => null),
           fetch(`${API}/api/items?page=1&limit=7&sort=size&order=desc`).catch(() => null),
+          fetch(`${API}/api/items?page=1&limit=7&sort=size&order=desc&type=directory`).catch(() => null),
         ]);
 
         if (!rootsResponse.ok) throw new Error(`HTTP ${rootsResponse.status}`);
@@ -256,6 +258,7 @@ export default function DiskLensApp() {
             drives={drives}
             roots={roots}
             largestItems={largestItems}
+            largestFolders={largestFolders}
             onOpenRoot={(root) => goRoot(root)}
             onOpenItem={openDetails}
             onOpenPrograms={() => setView("programs")}
@@ -299,17 +302,6 @@ export default function DiskLensApp() {
         {view === "ai" && (
           <div className="dl-feature-page">
             <AiStoragePanel embedded onClose={() => setView("home")} />
-          </div>
-        )}
-
-        {view === "safety" && (
-          <div className="dl-page dl-placeholder-page">
-            <div className="dl-eyebrow">ANALYSIS</div>
-            <h1>File Safety</h1>
-            <p>This area is reserved for the file danger analyzer.</p>
-            <button className="dl-primary-btn" onClick={() => setView("storage")}>
-              <span>Open Storage</span>
-            </button>
           </div>
         )}
 

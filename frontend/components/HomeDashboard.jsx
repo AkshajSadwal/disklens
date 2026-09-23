@@ -60,6 +60,7 @@ export default function HomeDashboard({
   drives,
   roots,
   largestItems,
+  largestFolders,
   onOpenRoot,
   onOpenItem,
   onOpenPrograms,
@@ -76,7 +77,7 @@ export default function HomeDashboard({
   const hasDriveMetadata = validDrives.length > 0;
 
   const fileItems = (largestItems || []).filter((item) => item.type === "file");
-  const folderItems = (largestItems || []).filter((item) => item.type === "directory");
+  const folderItems = (largestFolders || []).filter((item) => item.type === "directory");
   const biggest = largestItems?.[0];
   const filteredLargest =
     largestFilter === "files"
@@ -237,7 +238,6 @@ export default function HomeDashboard({
             <button onClick={() => onOpenRoot(roots?.[0]?.root)}><span><Icon name="scan" size={17} /></span><strong>Scan Now</strong><Icon name="chevronRight" size={15} /></button>
             <button onClick={onOpenAI}><span><Icon name="sparkles" size={17} /></span><strong>AI Storage Advisor</strong><Icon name="chevronRight" size={15} /></button>
             <button onClick={onOpenPrograms}><span><Icon name="programs" size={17} /></span><strong>Programs & Cleanup</strong><Icon name="chevronRight" size={15} /></button>
-            <button onClick={() => biggest && onOpenItem(biggest)}><span><Icon name="shield" size={17} /></span><strong>File Safety</strong><Icon name="chevronRight" size={15} /></button>
           </section>
 
           <section className="dl-home-panel dl-home-breakdown">

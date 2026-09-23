@@ -1,47 +1,42 @@
-import Icon from "./Icon";
+import SidebarNavItem from '../layout/SidebarNavItem';
+import StatusIndicator from '../ui/StatusIndicator';
 
 const items = [
-  { id: "home", label: "Home", icon: "home" },
-  { id: "storage", label: "Storage", icon: "storage" },
-  { id: "programs", label: "Programs & Cleanup", icon: "programs" },
-  { id: "ai", label: "AI Storage Advisor", icon: "ai" },
-  { id: "safety", label: "File Safety", icon: "shield", disabled: true },
-  { id: "settings", label: "Settings", icon: "settings", disabled: true },
+  { id: 'home', label: 'Home', icon: 'home' },
+  { id: 'storage', label: 'Storage', icon: 'storage' },
+  { id: 'programs', label: 'Programs & Cleanup', icon: 'programs' },
+  { id: 'ai', label: 'AI Storage Advisor', icon: 'ai' },
+  { id: 'settings', label: 'Settings', icon: 'settings', disabled: true },
 ];
 
 export default function Sidebar({ active, onNavigate }) {
   return (
-    <aside className="dl-sidebar">
-      <div className="dl-brand">
-        <div className="dl-brand-mark">D</div>
+    <aside className="sticky top-0 z-50 flex h-screen w-[220px] shrink-0 flex-col bg-gradient-to-b from-[var(--dl-sidebar)] to-[var(--dl-sidebar-2)] px-[14px] py-5 text-white shadow-dl-sidebar">
+      <div className="flex items-center gap-2.5 px-2 pb-7 pt-0.5">
+        <div className="grid h-[34px] w-[34px] place-items-center rounded-[10px] bg-[#2e7cf6] text-[17px] font-extrabold text-white shadow-[0_6px_18px_rgba(46,124,246,.22)]">
+          D
+        </div>
         <div>
-          <div className="dl-brand-name">DiskLens</div>
-          <div className="dl-brand-subtitle">Storage Intelligence</div>
+          <div className="text-[15px] font-extrabold tracking-[-.01em]">DiskLens</div>
+          <div className="mt-0.5 text-[9px] text-[#a9bddc]">Storage Intelligence</div>
         </div>
       </div>
 
-      <nav className="dl-nav" aria-label="Primary">
+      <nav className="grid gap-1.5" aria-label="Primary">
         {items.map((item) => (
-          <button
+          <SidebarNavItem
             key={item.id}
-            className={`dl-nav-item ${active === item.id ? "is-active" : ""}`}
-            disabled={item.disabled}
-            onClick={() => !item.disabled && onNavigate(item.id)}
-            title={item.disabled ? "Coming soon" : item.label}
-          >
-            <Icon name={item.icon} size={17} />
-            <span>{item.label}</span>
-          </button>
+            {...item}
+            active={active === item.id}
+            onNavigate={onNavigate}
+          />
         ))}
       </nav>
 
-      <div className="dl-sidebar-footer">
-        <div className="dl-status-dot" />
-        <div>
-          <div className="dl-status-title">Local only</div>
-          <div className="dl-status-text">Your index stays on this PC</div>
-        </div>
-      </div>
+      <StatusIndicator
+        title="Local only"
+        description="Your index stays on this PC"
+      />
     </aside>
   );
 }
