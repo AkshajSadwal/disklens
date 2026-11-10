@@ -49,3 +49,7 @@ temp/
 *.rar
 # Local server secrets
 server/.env
+
+
+MIGRATE_FROM_CURRENT.md
+TEST_REPORT.md
