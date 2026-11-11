@@ -30,10 +30,10 @@ function isSameOrChild(candidate, parent) {
   return relative === "" || (!relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative));
 }
 
-export function ensureSafeDeletePath(targetPath) {
+export function ensureSafeDeletePath(targetPath, platform = process.platform) {
   const normalized = path.resolve(targetPath);
   const volumeRoot = path.parse(normalized).root;
-  const protectedPaths = process.platform === "win32"
+  const protectedPaths = platform === "win32"
     ? [process.env.WINDIR || "C:\\Windows", process.env.ProgramFiles || "C:\\Program Files", process.env["ProgramFiles(x86)"] || "C:\\Program Files (x86)", process.env.ProgramData || "C:\\ProgramData"]
     : process.platform === "darwin"
       ? ["/System", "/Library", "/bin", "/sbin", "/usr", "/etc", "/private"]
@@ -46,7 +46,7 @@ export function ensureSafeDeletePath(targetPath) {
   }
   for (const protectedPath of protectedPaths) {
     const protectedResolved = path.resolve(protectedPath);
-    const same = process.platform === "win32"
+    const same = platform === "win32"
       ? normalized.toLowerCase() === protectedResolved.toLowerCase() || isSameOrChild(normalized.toLowerCase(), protectedResolved.toLowerCase())
       : isSameOrChild(normalized, protectedResolved);
     if (same) {
@@ -57,10 +57,10 @@ export function ensureSafeDeletePath(targetPath) {
   }
 }
 
-async function moveToRecycleBin(itemPath, type) {
+async function moveToRecycleBin(itemPath, type, { platform = process.platform, execFileAsync: run = execFileAsync } = {}) {
   await ensureItem(itemPath, type);
-  ensureSafeDeletePath(itemPath);
-  if (process.platform === "win32") {
+  ensureSafeDeletePath(itemPath, platform);
+  if (platform === "win32") {
     const script = `
       Add-Type -AssemblyName Microsoft.VisualBasic
       if ($env:DISKLENS_DELETE_TYPE -eq "directory") {
@@ -69,23 +69,24 @@ async function moveToRecycleBin(itemPath, type) {
         [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile($env:DISKLENS_DELETE_PATH, [Microsoft.VisualBasic.FileIO.UIOption]::OnlyErrorDialogs, [Microsoft.VisualBasic.FileIO.RecycleOption]::SendToRecycleBin)
       }
     `;
-    await execFileAsync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], {
+    await run("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], {
       windowsHide: true, maxBuffer: 1024 * 1024,
+      timeout: 15000,
       env: { ...process.env, DISKLENS_DELETE_PATH: itemPath, DISKLENS_DELETE_TYPE: type },
     });
     return;
   }
-  if (process.platform === "darwin") {
+  if (platform === "darwin") {
     const script = 'on run argv\nset targetItem to POSIX file (item 1 of argv)\ntell application "Finder" to delete targetItem\nend run';
-    await execFileAsync("osascript", ["-e", script, itemPath], { timeout: 15000 });
+    await run("osascript", ["-e", script, itemPath], { timeout: 15000 });
     return;
   }
   try {
-    await execFileAsync("gio", ["trash", itemPath], { timeout: 15000 });
+    await run("gio", ["trash", itemPath], { timeout: 15000 });
   } catch (error) {
     if (error.code !== "ENOENT") throw error;
     try {
-      await execFileAsync("trash-put", [itemPath], { timeout: 15000 });
+      await run("trash-put", [itemPath], { timeout: 15000 });
     } catch (fallbackError) {
       if (fallbackError.code !== "ENOENT") throw fallbackError;
       const unavailable = new Error("A desktop trash utility (gio or trash-put) is not installed. Use permanent delete only after reviewing the warning.");
@@ -102,8 +103,8 @@ async function permanentlyDelete(itemPath, type) {
   else await fs.unlink(itemPath);
 }
 
-export async function deleteItem(itemPath, type, mode) {
-  if (mode === "recycle") return moveToRecycleBin(itemPath, type);
+export async function deleteItem(itemPath, type, mode, options) {
+  if (mode === "recycle") return moveToRecycleBin(itemPath, type, options);
   if (mode === "permanent") return permanentlyDelete(itemPath, type);
   const error = new Error("Invalid delete mode.");
   error.code = "INVALID_MODE";

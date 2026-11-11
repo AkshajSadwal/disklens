@@ -36,6 +36,14 @@ export async function uploadScanBatch({ server, root, scanId, items, signal }) {
   return postJson({ server, route: "/api/scans", body: { phase: "batch", root, scanId, items }, signal });
 }
 
+export async function updateScanItemAccess({ server, root, scanId, itemPath, accessStatus, errorCode, signal }) {
+  return postJson({
+    server, route: "/api/scans",
+    body: { phase: "access", root, scanId, path: itemPath, accessStatus, errorCode }, signal,
+    retries: 1,
+  });
+}
+
 export async function updateScanProgress({ server, root, scanId, scanned, uploaded, skipped, total, signal }) {
   return postJson({
     server, route: "/api/scans",
@@ -53,6 +61,6 @@ export async function abortScan({ server, root, scanId }) {
   return postJson({ server, route: "/api/scans", body: { phase: "abort", root, scanId }, retries: 1 });
 }
 
-export async function uploadDriveMetadata({ server, drive }) {
-  return postJson({ server, route: "/api/drives", body: drive, retries: 2 });
+export async function uploadDriveMetadata({ server, drive, signal }) {
+  return postJson({ server, route: "/api/drives", body: drive, signal, retries: 2 });
 }

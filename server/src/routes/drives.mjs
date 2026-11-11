@@ -95,13 +95,15 @@ function readStoredDrives(db) {
   `).all();
 }
 
-export function registerDriveRoutes(app, db) {
+export function registerDriveRoutes(app, db, { platform = process.platform } = {}) {
   app.get("/api/drives", async (request) => {
-    try {
-      const liveDrives = await readLiveWindowsDrives();
-      for (const drive of liveDrives) upsertDrive(db, drive);
-    } catch (error) {
-      request.log.warn({ err: error }, "Could not read live Windows drive metadata; using stored values.");
+    if (platform === "win32") {
+      try {
+        const liveDrives = await readLiveWindowsDrives();
+        for (const drive of liveDrives) upsertDrive(db, drive);
+      } catch (error) {
+        request.log.warn({ err: error }, "Could not read live Windows drive metadata; using stored values.");
+      }
     }
 
     return readStoredDrives(db);

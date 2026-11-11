@@ -4,7 +4,7 @@ set -eu
 ensure_node() {
   if command -v node >/dev/null 2>&1; then
     major="$(node -p 'Number(process.versions.node.split(".")[0])' 2>/dev/null || echo 0)"
-    [ "$major" -ge 20 ] && return
+    [ "$major" -ge 22 ] && return
   fi
   command -v curl >/dev/null 2>&1 || { echo "curl is required to install the local Node.js runtime." >&2; exit 1; }
   case "$(uname -m)" in

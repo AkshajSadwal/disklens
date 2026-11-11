@@ -1,0 +1,52 @@
+name: DiskLens CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  server-and-collector:
+    name: Tests · ${{ matrix.runner }} · Node ${{ matrix.node }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        runner: [windows-latest, ubuntu-24.04, macos-15-intel, macos-15]
+        node: [22, 24, 26]
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+      - name: Install server dependencies
+        run: npm ci --no-audit --no-fund
+        working-directory: server
+      - name: Run bounded tests
+        run: npm test
+        working-directory: server
+
+  frontend-build:
+    name: Frontend production build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install frontend dependencies
+        run: npm ci --no-audit --no-fund
+        working-directory: frontend
+      - name: Build frontend
+        run: npm run build
+        working-directory: frontend

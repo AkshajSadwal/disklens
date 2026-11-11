@@ -12,27 +12,66 @@ const LEVELS = {
 };
 
 export default function AiFileAnalysisPanel({ item, onClose }) {
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [preview, setPreview] = useState(null);
+  const [providerStatus, setProviderStatus] = useState(null);
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
 
   useEffect(() => {
     let cancelled = false;
-    async function run() {
+    async function loadStatus() {
       try {
-        const response = await fetch(`${API}/api/ai/file/${item.id}`, { method: "POST" });
+        const response = await fetch(`${API}/api/ai/status`);
         const payload = await response.json().catch(() => null);
         if (!response.ok) throw new Error(payload?.error || `HTTP ${response.status}`);
-        if (!cancelled) setData(payload);
+        if (!cancelled) setProviderStatus(payload);
       } catch (err) {
         if (!cancelled) setError(err.message);
-      } finally {
-        if (!cancelled) setLoading(false);
       }
     }
-    run();
+    loadStatus();
     return () => { cancelled = true; };
-  }, [item.id]);
+  }, []);
+
+  async function preparePreview() {
+    setPreviewLoading(true);
+    setError("");
+    setData(null);
+    try {
+      const response = await fetch(`${API}/api/ai/file/${item.id}/preview`, { method: "POST" });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(payload?.error || `HTTP ${response.status}`);
+      setPreview(payload);
+    } catch (err) {
+      setError(err.message);
+      setPreview(null);
+    } finally {
+      setPreviewLoading(false);
+    }
+  }
+
+  async function runAnalysis() {
+    setLoading(true);
+    setError("");
+    try {
+      const response = await fetch(`${API}/api/ai/file/${item.id}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(preview ? { previewId: preview.previewId } : {}),
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(payload?.error || `HTTP ${response.status}`);
+      setData(payload);
+      setPreview(null);
+    } catch (err) {
+      setError(err.message);
+      setPreview(null);
+    } finally {
+      setLoading(false);
+    }
+  }
 
   const level = data?.analysis?.dangerLevel || "unknown";
 
@@ -48,8 +87,8 @@ export default function AiFileAnalysisPanel({ item, onClose }) {
           <button onClick={onClose} style={{ background: "#232832", color: "#fff", border: "1px solid #343b47", borderRadius: 8, padding: "8px 12px", cursor: "pointer" }}>✕</button>
         </div>
 
-        {loading ? (
-          <div style={{ color: "#8f98a8", padding: 50, textAlign: "center" }}>Collecting local evidence and running the configured analysis provider…</div>
+        {loading || previewLoading ? (
+          <div style={{ color: "#8f98a8", padding: 50, textAlign: "center" }}>{previewLoading ? "Preparing a local metadata preview…" : "Running the selected analysis…"}</div>
         ) : error ? (
           <div style={{ background: "#30181b", color: "#ffb4b4", padding: 14, borderRadius: 10 }}>{error}</div>
         ) : data ? (
@@ -93,7 +132,25 @@ export default function AiFileAnalysisPanel({ item, onClose }) {
               This is an evidence-based AI assessment, not a malware verdict. For suspicious files, scan or quarantine rather than relying on deletion as a security response.
             </div>
           </>
-        ) : null}
+        ) : (
+          <div style={{ color: "#c7cdd6" }}>
+            <p style={{ color: "#9aa5b5", fontSize: 13, lineHeight: 1.55 }}>Analysis is started only when you choose it. Hosted analysis receives minimized metadata, never the full path, file name, file contents, or hash.</p>
+            {providerStatus?.configured ? (
+              <button onClick={preview ? runAnalysis : preparePreview} style={{ background: "#4c83ef", color: "#fff", border: 0, borderRadius: 8, padding: "10px 14px", cursor: "pointer" }}>
+                {preview ? `Send preview to ${preview.provider}` : "Preview hosted input"}
+              </button>
+            ) : (
+              <button onClick={runAnalysis} style={{ background: "#4c83ef", color: "#fff", border: 0, borderRadius: 8, padding: "10px 14px", cursor: "pointer" }}>Run local rule-based analysis</button>
+            )}
+            {preview && <div style={{ border: "1px solid #343b47", borderRadius: 10, padding: 12, marginTop: 14 }}>
+              <strong>Review before sending · {preview.provider} · {preview.model}</strong>
+              <p style={{ color: "#9aa5b5", fontSize: 12 }}>{preview.inputBytes.toLocaleString()} input bytes · about {preview.estimatedInputTokens.toLocaleString()} tokens · up to {preview.maxResponseTokens} response tokens. Token count is approximate.</p>
+              <pre style={{ maxHeight: 260, overflow: "auto", whiteSpace: "pre-wrap", overflowWrap: "anywhere", color: "#bcc6d5", background: "#0d1015", padding: 10, fontSize: 10 }}>{JSON.stringify(preview.requestBody, null, 2)}</pre>
+              <small style={{ color: "#788291" }}>Preview expires in 5 minutes. No provider request has been sent yet.</small>
+              <div><button onClick={runAnalysis} style={{ display: "block", marginTop: 10, background: "#4c83ef", color: "#fff", border: 0, borderRadius: 8, padding: "10px 14px", cursor: "pointer" }}>Send this preview</button></div>
+            </div>}
+          </div>
+        )}
       </div>
     </div>
   );

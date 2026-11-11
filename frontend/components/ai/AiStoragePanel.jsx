@@ -25,6 +25,7 @@ export default function AiStoragePanel({ onClose, embedded = false }) {
   const [include, setInclude] = useState({ programs: true, files: true, folders: true });
   const [topLoading, setTopLoading] = useState(false);
   const [topData, setTopData] = useState(null);
+  const [topPreview, setTopPreview] = useState(null);
   const [programs, setPrograms] = useState([]);
   const [targetType, setTargetType] = useState("program");
   const [targetQuery, setTargetQuery] = useState("");
@@ -33,6 +34,7 @@ export default function AiStoragePanel({ onClose, embedded = false }) {
   const [selectedTarget, setSelectedTarget] = useState(null);
   const [targetLoading, setTargetLoading] = useState(false);
   const [targetData, setTargetData] = useState(null);
+  const [targetPreview, setTargetPreview] = useState(null);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -59,6 +61,7 @@ export default function AiStoragePanel({ onClose, embedded = false }) {
   useEffect(() => {
     setError("");
     setSelectedTarget(null);
+    setTargetPreview(null);
     setTargetResults([]);
     const query = targetQuery.trim();
     setTargetSearchLoading(Boolean(query));
@@ -114,16 +117,19 @@ export default function AiStoragePanel({ onClose, embedded = false }) {
 
   function resetResults() {
     setTopData(null);
+    setTopPreview(null);
     setTargetData(null);
+    setTargetPreview(null);
     setSelectedTarget(null);
     setError("");
   }
 
   function toggleInclude(name) {
     setInclude((prev) => ({ ...prev, [name]: !prev[name] }));
+    setTopPreview(null);
   }
 
-  async function runTopAnalysis() {
+  async function previewTopAnalysis() {
     if (!Object.values(include).some(Boolean)) {
       setError("Select at least one of programs, files, or folders.");
       return;
@@ -133,14 +139,14 @@ export default function AiStoragePanel({ onClose, embedded = false }) {
     setTopData(null);
     setTargetData(null);
     try {
-      const response = await fetch(`${API}/api/ai/storage/top`, {
+      const response = await fetch(`${API}/api/ai/storage/top/preview`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ limit: Math.min(50, Math.max(1, Number(limit) || 10)), include }),
       });
       const data = await response.json().catch(() => null);
       if (!response.ok) throw new Error(data?.error || `HTTP ${response.status}`);
-      setTopData(data);
+      setTopPreview(data);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -148,7 +154,30 @@ export default function AiStoragePanel({ onClose, embedded = false }) {
     }
   }
 
-  async function runTargetAnalysis() {
+  async function runTopAnalysis() {
+    setTopLoading(true);
+    setError("");
+    setTopData(null);
+    setTargetData(null);
+    try {
+      const response = await fetch(`${API}/api/ai/storage/top`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(topPreview ? { previewId: topPreview.previewId } : { limit: Math.min(50, Math.max(1, Number(limit) || 10)), include }),
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(data?.error || `HTTP ${response.status}`);
+      setTopData(data);
+      setTopPreview(null);
+    } catch (err) {
+      setError(err.message);
+      setTopPreview(null);
+    } finally {
+      setTopLoading(false);
+    }
+  }
+
+  async function previewTargetAnalysis() {
     if (!selectedTarget) {
       setError("Select a program, file, or folder first.");
       return;
@@ -158,7 +187,7 @@ export default function AiStoragePanel({ onClose, embedded = false }) {
     setTargetData(null);
     setTopData(null);
     try {
-      const response = await fetch(`${API}/api/ai/storage/target`, {
+      const response = await fetch(`${API}/api/ai/storage/target/preview`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -171,9 +200,39 @@ export default function AiStoragePanel({ onClose, embedded = false }) {
       });
       const data = await response.json().catch(() => null);
       if (!response.ok) throw new Error(data?.error || `HTTP ${response.status}`);
-      setTargetData(data);
+      setTargetPreview(data);
     } catch (err) {
       setError(err.message);
+    } finally {
+      setTargetLoading(false);
+    }
+  }
+
+  async function runTargetAnalysis() {
+    if (!selectedTarget) return;
+    setTargetLoading(true);
+    setError("");
+    setTargetData(null);
+    setTopData(null);
+    try {
+      const response = await fetch(`${API}/api/ai/storage/target`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(targetPreview ? { previewId: targetPreview.previewId } : {
+          type: selectedTarget.type,
+          id: selectedTarget.id,
+          name: selectedTarget.name,
+          version: selectedTarget.version,
+          publisher: selectedTarget.publisher,
+        }),
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(data?.error || `HTTP ${response.status}`);
+      setTargetData(data);
+      setTargetPreview(null);
+    } catch (err) {
+      setError(err.message);
+      setTargetPreview(null);
     } finally {
       setTargetLoading(false);
     }
@@ -230,7 +289,7 @@ export default function AiStoragePanel({ onClose, embedded = false }) {
               <div className="dl-ai-controls">
                 <div className="dl-ai-field">
                   <span className="dl-ai-label">Number to analyze</span>
-                  <input className="dl-ai-number" type="number" min="1" max="50" value={limit} onChange={(e) => setLimit(Math.min(50, Math.max(1, Number(e.target.value) || 1)))} />
+                  <input className="dl-ai-number" type="number" min="1" max="20" value={limit} onChange={(e) => { setLimit(Math.min(20, Math.max(1, Number(e.target.value) || 1))); setTopPreview(null); }} />
                 </div>
                 <div className="dl-ai-field dl-grow">
                   <span className="dl-ai-label">What should AI review?</span>
@@ -242,17 +301,24 @@ export default function AiStoragePanel({ onClose, embedded = false }) {
                     ))}
                   </div>
                 </div>
-                <button className="dl-primary-btn" onClick={runTopAnalysis} disabled={topLoading}>
-                  {topLoading ? "Analyzing..." : "Get AI Advice"}
+                <button className="dl-primary-btn" onClick={status?.configured ? (topPreview ? runTopAnalysis : previewTopAnalysis) : runTopAnalysis} disabled={topLoading}>
+                  {topLoading ? (topPreview ? "Analyzing..." : "Preparing preview...") : status?.configured ? (topPreview ? `Send to ${topPreview.provider}` : "Preview AI input") : "Get Local Advice"}
                 </button>
               </div>
-              <div className="dl-ai-note">Only selected item details are used for analysis. No files are deleted.</div>
+              <div className="dl-ai-note">Hosted advice sends only a small summary of the selected items (program names, file type and size, and coarse location category). It never sends file contents or full paths. Provider billing may apply. No files are deleted.</div>
+              {topPreview && <div className="dl-ai-preview" role="region" aria-label="Hosted AI input preview">
+                <div className="dl-ai-preview-head"><strong>Review before sending</strong><span>{topPreview.provider} · {topPreview.model}</span></div>
+                <p>{topPreview.inputBytes.toLocaleString()} input bytes · about {topPreview.estimatedInputTokens.toLocaleString()} tokens · up to {topPreview.maxResponseTokens} response tokens. Token count is an estimate.</p>
+                <pre>{JSON.stringify(topPreview.requestBody, null, 2)}</pre>
+                <small>Preview expires in 5 minutes. Sending submits this same server-held snapshot; it does not re-read the index.</small>
+                <button className="dl-primary-btn" onClick={runTopAnalysis} disabled={topLoading}>{topLoading ? "Analyzing..." : `Send to ${topPreview.provider}`}</button>
+              </div>}
             </div>
           ) : (
             <div className="dl-ai-config">
               <div className="dl-ai-target-types">
                 {[["program", "Program"], ["file", "File"], ["folder", "Folder"]].map(([type, label]) => (
-                  <button key={type} className={`dl-ai-target-type ${targetType === type ? "active" : ""}`} onClick={() => { setTargetType(type); setTargetQuery(""); setTargetResults([]); setSelectedTarget(null); setTargetData(null); }}>
+                  <button key={type} className={`dl-ai-target-type ${targetType === type ? "active" : ""}`} onClick={() => { setTargetType(type); setTargetQuery(""); setTargetResults([]); setSelectedTarget(null); setTargetData(null); setTargetPreview(null); }}>
                     {label}
                   </button>
                 ))}
@@ -267,7 +333,7 @@ export default function AiStoragePanel({ onClose, embedded = false }) {
                   {targetResults.map((item, index) => {
                     const active = selectedTarget && selectedTarget.type === item.type && selectedTarget.id === item.id && selectedTarget.name === item.name;
                     return (
-                      <button key={`${item.type}|${item.id ?? item.name}|${index}`} className={`dl-ai-result ${active ? "active" : ""}`} onClick={() => setSelectedTarget(item)}>
+                      <button key={`${item.type}|${item.id ?? item.name}|${index}`} className={`dl-ai-result ${active ? "active" : ""}`} onClick={() => { setSelectedTarget(item); setTargetPreview(null); }}>
                         <strong>{item.name}</strong>
                         <span>{item.type === "program" ? `${item.publisher || "Unknown publisher"}${item.version ? ` · ${item.version}` : ""}` : `${formatBytes(item.size || 0)} · ${item.path}`}</span>
                       </button>
@@ -280,11 +346,19 @@ export default function AiStoragePanel({ onClose, embedded = false }) {
                   <div className="dl-ai-selected-title">Selected</div>
                   <div className="dl-ai-selected-name">{targetLabel}</div>
                   <div className="dl-ai-selected-path">{selectedTarget.path || selectedTarget.installLocation || selectedTarget.publisher || ""}</div>
-                  <button className="dl-primary-btn" style={{ marginTop: 9 }} onClick={runTargetAnalysis} disabled={targetLoading}>
-                    {targetLoading ? "Analyzing..." : "Analyze Selected"}
+                  <button className="dl-primary-btn" style={{ marginTop: 9 }} onClick={status?.configured ? (targetPreview ? runTargetAnalysis : previewTargetAnalysis) : runTargetAnalysis} disabled={targetLoading}>
+                    {targetLoading ? (targetPreview ? "Analyzing..." : "Preparing preview...") : status?.configured ? (targetPreview ? `Send to ${targetPreview.provider}` : "Preview AI input") : "Analyze with Local Rules"}
                   </button>
+                  {targetPreview && <div className="dl-ai-preview" role="region" aria-label="Hosted AI input preview">
+                    <div className="dl-ai-preview-head"><strong>Review before sending</strong><span>{targetPreview.provider} · {targetPreview.model}</span></div>
+                    <p>{targetPreview.inputBytes.toLocaleString()} input bytes · about {targetPreview.estimatedInputTokens.toLocaleString()} tokens · up to {targetPreview.maxResponseTokens} response tokens. Token count is an estimate.</p>
+                    <pre>{JSON.stringify(targetPreview.requestBody, null, 2)}</pre>
+                    <small>Preview expires in 5 minutes. Sending submits this same server-held snapshot; it does not re-read the index.</small>
+                    <button className="dl-primary-btn" onClick={runTargetAnalysis} disabled={targetLoading}>{targetLoading ? "Analyzing..." : `Send to ${targetPreview.provider}`}</button>
+                  </div>}
                 </div>
               )}
+              <div className="dl-ai-note">Hosted analysis receives only a minimized summary of the selected target. It never sends full paths or file contents. Provider billing may apply; local rules remain offline and free.</div>
             </div>
           )}
 
@@ -295,7 +369,7 @@ export default function AiStoragePanel({ onClose, embedded = false }) {
               {topData?.analysis && (
                 <>
                   <div className="dl-ai-summary">
-                    <div className="dl-ai-summary-kicker">{topData.analysis.source === "local-rules" ? "Local Rule-Based Summary" : "AI Summary"}</div>
+                    <div className="dl-ai-summary-kicker">{topData.analysis.source === "local-rules" ? "Local Rule-Based Summary" : `${topData.analysis.source} Summary`}</div>
                     <h3>{topData.analysis.summary}</h3>
                   </div>
                   {(topData.analysis.suggestions || []).map((suggestion, index) => {
@@ -332,7 +406,7 @@ export default function AiStoragePanel({ onClose, embedded = false }) {
                     {targetData.target.modifiedAt && <p>Modified: {formatDate(targetData.target.modifiedAt)}</p>}
                   </div>
                   <div className="dl-ai-card">
-                    <div className="dl-ai-summary-kicker">{targetData.analysis.source === "local-rules" ? "Local rule-based assessment" : "AI Assessment"} · {targetData.analysis.confidence}% confidence</div>
+                    <div className="dl-ai-summary-kicker">{targetData.analysis.source === "local-rules" ? "Local rule-based assessment" : `${targetData.analysis.source} assessment`} · {targetData.analysis.confidence}% confidence</div>
                     <h3>{targetData.analysis.storageAssessment}</h3>
                     <p>{targetData.analysis.summary}</p>
                   </div>

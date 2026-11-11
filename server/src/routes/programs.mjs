@@ -57,7 +57,7 @@ export function registerProgramRoutes(app, db) {
       FROM items
       WHERE type IN ('file', 'directory') ${where}
       ORDER BY size DESC
-      LIMIT 100000
+      LIMIT 10000
     `).all(...params);
 
     const analysis = buildProgramCandidates(items, program);

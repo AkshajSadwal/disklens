@@ -1,7 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
 import Fastify from "fastify";
-import cors from "@fastify/cors";
 
 import { createDatabase } from "./db/database.mjs";
 import { registerHealthRoutes } from "./routes/health.mjs";
@@ -15,6 +14,12 @@ import { registerDeleteRoutes } from "./routes/delete.mjs";
 import { registerProgramRoutes } from "./routes/programs.mjs";
 import { registerAIRoutes } from "./routes/ai.mjs";
 import { registerDriveRoutes } from "./routes/drives.mjs";
+import { registerCleanupRoutes } from "./routes/cleanup.mjs";
+import { registerAppRoutes } from "./routes/app.mjs";
+import { installDiskLensOriginPolicy } from "./security/localOrigin.mjs";
+import { requireSupportedNodeRuntime } from "../../shared/nodeRuntime.mjs";
+
+requireSupportedNodeRuntime("DiskLens server");
 
 function loadLocalEnv() {
   const envFile = path.resolve(process.cwd(), ".env");
@@ -45,13 +50,7 @@ const app = Fastify({
   requestTimeout: 30_000,
 });
 
-await app.register(cors, {
-  origin(origin, callback) {
-    // DiskLens binds to loopback. Allow browser UIs served from loopback only.
-    const allowed = !origin || /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
-    callback(null, allowed);
-  },
-});
+await installDiskLensOriginPolicy(app);
 
 const db = createDatabase(dbPath);
 registerHealthRoutes(app);
@@ -65,6 +64,8 @@ registerExplorerRoutes(app, db);
 registerDeleteRoutes(app, db);
 registerProgramRoutes(app, db);
 registerAIRoutes(app, db);
+registerCleanupRoutes(app, db);
+registerAppRoutes(app);
 
 app.addHook("onClose", async () => {
   try { db.close(); } catch {}

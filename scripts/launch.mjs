@@ -6,6 +6,15 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
 import { getUserDataDirectory, prepareUserDataDirectory, runFirstRun } from "./first-run.mjs";
+import { buildFrontendDevArgs } from "./frontendCommand.mjs";
+import { requireSupportedNodeRuntime } from "../shared/nodeRuntime.mjs";
+
+try {
+  requireSupportedNodeRuntime("DiskLens launcher");
+} catch (error) {
+  console.error(error.message);
+  process.exit(1);
+}
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const children = new Set();
@@ -211,6 +220,7 @@ try {
   const serverEnv = {
     ...process.env,
     DISKLENS_PORT: String(apiPort),
+    DISKLENS_WEB_ORIGIN: webUrl,
     DISKLENS_DB_PATH: dbPath,
   };
 
@@ -223,7 +233,7 @@ try {
 
   const nextBin = path.join(frontendDir, "node_modules", "next", "dist", "bin", "next");
   if (!existsSync(nextBin)) throw new Error("Next.js executable is missing. Re-run the launcher to install frontend dependencies.");
-  spawnManaged(process.execPath, [nextBin, "dev", "-p", String(webPort)], frontendDir, {
+  spawnManaged(process.execPath, buildFrontendDevArgs(nextBin, webPort), frontendDir, {
     ...process.env,
     PORT: String(webPort),
     NEXT_PUBLIC_DISKLENS_API: apiUrl,

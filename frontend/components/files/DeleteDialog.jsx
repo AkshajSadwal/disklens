@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { API } from "../../lib/api";
 import { formatBytes } from "../../lib/formatters";
 import Icon from "../common/Icon";
@@ -9,11 +9,35 @@ export default function DeleteDialog({ items, onClose, onComplete }) {
   const [mode, setMode] = useState("recycle");
   const [selectedIds, setSelectedIds] = useState(() => new Set(items.map((item) => item.id)));
   const [confirmedPermanent, setConfirmedPermanent] = useState(false);
+  const [confirmedActivity, setConfirmedActivity] = useState(false);
+  const [activity, setActivity] = useState({ status: "checking", message: "Checking selected files for active use…" });
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState("");
 
   const selectedItems = useMemo(() => items.filter((item) => selectedIds.has(item.id)), [items, selectedIds]);
   const selectedSize = selectedItems.reduce((sum, item) => sum + Number(item.size || 0), 0);
+
+  useEffect(() => {
+    if (!selectedIds.size) { setActivity(null); setConfirmedActivity(false); return undefined; }
+    let active = true;
+    const controller = new AbortController();
+    setActivity({ status: "checking", message: "Checking selected files for active use…" });
+    setConfirmedActivity(false);
+    const timer = setTimeout(async () => {
+      try {
+        const response = await fetch(`${API}/api/delete/activity-check`, {
+          method: "POST", headers: { "content-type": "application/json" },
+          body: JSON.stringify({ ids: [...selectedIds] }), signal: controller.signal,
+        });
+        const data = await response.json().catch(() => null);
+        if (!response.ok) throw new Error(data?.error || `Activity check failed (${response.status}).`);
+        if (active) setActivity(data);
+      } catch (err) {
+        if (active && err.name !== "AbortError") setActivity({ status: "unavailable", message: err.message });
+      }
+    }, 180);
+    return () => { active = false; clearTimeout(timer); controller.abort(); };
+  }, [selectedIds]);
 
   function toggleItem(id) {
     setSelectedIds((prev) => {
@@ -30,6 +54,14 @@ export default function DeleteDialog({ items, onClose, onComplete }) {
     }
     if (mode === "permanent" && !confirmedPermanent) {
       setError("Confirm permanent deletion first.");
+      return;
+    }
+    if (activity?.status === "checking") {
+      setError("Wait for the file activity check to finish before continuing.");
+      return;
+    }
+    if (activity?.status === "in-use" && !confirmedActivity) {
+      setError("Review the open-handle warning and confirm before continuing.");
       return;
     }
 
@@ -80,10 +112,19 @@ export default function DeleteDialog({ items, onClose, onComplete }) {
           })}
         </div>
 
+        {activity && <div className={`dl-delete-activity status-${activity.status}`} role="status">
+          <strong>{activity.status === "checking" ? "Checking file activity" : activity.status === "in-use" ? "Some files are in use" : activity.status === "clear" ? "No open files detected" : "File activity could not be fully checked"}</strong>
+          <span>{activity.message}{activity.processIds?.length ? ` Process IDs: ${activity.processIds.join(", ")}.` : ""}</span>
+        </div>}
+        {activity?.status === "in-use" && <label className="dl-delete-confirm">
+          <input type="checkbox" checked={confirmedActivity} onChange={(event) => { setConfirmedActivity(event.target.checked); setError(""); }} disabled={deleting} />
+          <span>I reviewed the open-handle warning and want DiskLens to try this action. The operating system may still refuse it.</span>
+        </label>}
+
         <div className="dl-delete-modes">
           <button className={`dl-delete-mode ${mode === "recycle" ? "active" : ""}`} onClick={() => { setMode("recycle"); setConfirmedPermanent(false); setError(""); }} disabled={deleting}>
             <strong>Move to Recycle Bin</strong>
-            <span>Recoverable from the Windows Recycle Bin.</span>
+            <span>Moves to the system Trash or Recycle Bin when supported by this platform.</span>
           </button>
           <button className={`dl-delete-mode permanent ${mode === "permanent" ? "active" : ""}`} onClick={() => { setMode("permanent"); setError(""); }} disabled={deleting}>
             <strong>Delete permanently</strong>
@@ -94,7 +135,7 @@ export default function DeleteDialog({ items, onClose, onComplete }) {
         {mode === "permanent" && (
           <label className="dl-delete-confirm">
             <input type="checkbox" checked={confirmedPermanent} onChange={(event) => { setConfirmedPermanent(event.target.checked); setError(""); }} disabled={deleting} />
-            <span>I understand that the selected item(s) will be permanently deleted and Windows Recycle Bin will not be used.</span>
+            <span>I understand that the selected item(s) will be permanently deleted and system Trash or Recycle Bin will not be used.</span>
           </label>
         )}
 
@@ -104,8 +145,8 @@ export default function DeleteDialog({ items, onClose, onComplete }) {
           <div className="summary">{selectedItems.length} item{selectedItems.length === 1 ? "" : "s"} · {formatBytes(selectedSize)}</div>
           <div className="actions">
             <button className="dl-secondary-btn" onClick={onClose} disabled={deleting}>Cancel</button>
-            <button className={mode === "permanent" ? "dl-danger-btn" : "dl-primary-btn"} onClick={handleDelete} disabled={deleting || !selectedItems.length}>
-              {deleting ? "Deleting..." : mode === "permanent" ? "Delete permanently" : "Move to Recycle Bin"}
+            <button className={mode === "permanent" ? "dl-danger-btn" : "dl-primary-btn"} onClick={handleDelete} disabled={deleting || !selectedItems.length || activity?.status === "checking"}>
+              {deleting ? "Deleting..." : activity?.status === "checking" ? "Checking files…" : mode === "permanent" ? "Delete permanently" : "Move to Trash / Recycle Bin"}
             </button>
           </div>
         </div>

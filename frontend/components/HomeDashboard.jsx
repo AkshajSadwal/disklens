@@ -88,12 +88,41 @@ export default function HomeDashboard({
   const [foldersLoading, setFoldersLoading] = useState(false);
   const [programs, setPrograms] = useState([]);
   const [programsLoading, setProgramsLoading] = useState(false);
-  const [selectedScanRoot, setSelectedScanRoot] = useState(roots?.[0]?.root || "");
+  const [scanHistory, setScanHistory] = useState([]);
+  const [scanHistoryError, setScanHistoryError] = useState("");
+  const [selectedScanRoots, setSelectedScanRoots] = useState(() =>
+    roots?.[0]?.root ? [roots[0].root] : [],
+  );
 
   useEffect(() => {
-    if (!roots?.length) { setSelectedScanRoot(""); return; }
-    if (!roots.some((root) => root.root === selectedScanRoot)) setSelectedScanRoot(roots[0].root);
-  }, [roots, selectedScanRoot]);
+    const available = new Set((roots || []).map((root) => root.root));
+    setSelectedScanRoots((current) => {
+      const retained = current.filter((root) => available.has(root));
+      if (retained.length) return retained;
+      return roots?.[0]?.root ? [roots[0].root] : [];
+    });
+  }, [roots]);
+
+  const scanIsActive = ["starting", "running", "cancelling"].includes(scanStatus?.status);
+  const scanProgressPercent = Math.max(0, Math.min(100, Number(scanStatus?.progressPercent) || 0));
+  const elapsedSeconds = scanIsActive && scanStatus?.startedAt
+    ? Math.max(0, Math.floor((Date.now() - Date.parse(scanStatus.startedAt)) / 1000))
+    : 0;
+  const remainingItems = Number(scanStatus?.currentTotalEstimate || 0) - Number(scanStatus?.currentScannedCount || 0);
+  const etaSeconds = remainingItems > 0 && Number(scanStatus?.currentScannedCount || 0) > 0
+    ? Math.ceil(elapsedSeconds * remainingItems / Number(scanStatus.currentScannedCount))
+    : null;
+  const formatDuration = (seconds) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return mins ? `${mins}m ${secs}s` : `${secs}s`;
+  };
+
+  function toggleScanRoot(root) {
+    setSelectedScanRoots((current) => current.includes(root)
+      ? current.filter((value) => value !== root)
+      : [...current, root]);
+  }
 
   const driveMap = new Map(
     (drives || []).map((item) => [
@@ -206,6 +235,23 @@ export default function HomeDashboard({
   );
   const hasDriveMetadata = validDrives.length > 0;
 
+  useEffect(() => {
+    const controller = new AbortController();
+    async function loadScanHistory() {
+      try {
+        const response = await fetch(`${API}/api/scans/history?limit=8`, { signal: controller.signal });
+        const data = await response.json().catch(() => null);
+        if (!response.ok) throw new Error(data?.error || `HTTP ${response.status}`);
+        setScanHistory(data?.runs || []);
+        setScanHistoryError("");
+      } catch (error) {
+        if (error.name !== "AbortError") setScanHistoryError(error.message);
+      }
+    }
+    loadScanHistory();
+    return () => controller.abort();
+  }, [scanStatus?.status, scanStatus?.completedAt]);
+
   // Prefer indexed install-location bytes; otherwise use the OS/package estimate.
   // Unknown sizes sort last, rather than inheriting discovery order.
   const getProgramSize = (program) => Number(program.size) > 0
@@ -242,7 +288,8 @@ export default function HomeDashboard({
         <div className="dl-home-scan-wrap">
           <button
             className="dl-home-scan"
-            onClick={() => onOpenRoot(roots?.[0]?.root)}
+            onClick={() => onScanNow?.(selectedScanRoots)}
+            disabled={!selectedScanRoots.length || scanStarting || scanIsActive}
           >
             <Icon name="scan" size={18} />
             Scan Now
@@ -323,7 +370,7 @@ export default function HomeDashboard({
             <div className="dl-home-panel-head">
               <div>
                 <h2>Drives</h2>
-                <p>Actual capacity reported by your system.</p>
+                <p>Drive used/free is reported by your system. Indexed bytes are the sum of file metadata DiskLens could read; exclusions, permissions, and filesystem overhead make these totals differ.</p>
               </div>
               <button
                 className="dl-home-link"
@@ -462,42 +509,61 @@ export default function HomeDashboard({
             </div>
             <div className="dl-home-scan-picker">
               <div className="dl-home-scan-label-row">
-                <label htmlFor="dl-scan-root">Location to scan</label>
+                <label>Locations to scan</label>
                 <button type="button" className="dl-home-add-location" onClick={async () => {
                   const root = await onAddScanLocation?.();
-                  if (root) setSelectedScanRoot(root);
-                }} disabled={scanStarting || scanStatus?.status === "running" || scanStatus?.status === "starting"}>
-                  <Icon name="folder-plus" size={14} /> Add folder
+                  if (root) setSelectedScanRoots((current) => current.includes(root) ? current : [...current, root]);
+                }} disabled={scanStarting || scanIsActive}>
+                  <Icon name="folder-plus" size={15} /> Add folder
                 </button>
               </div>
-              <select id="dl-scan-root" value={selectedScanRoot} onChange={(event) => setSelectedScanRoot(event.target.value)} disabled={!roots?.length || scanStarting || scanStatus?.status === "running" || scanStatus?.status === "starting"}>
-                {(roots || []).length ? (roots || []).map((root) => <option key={root.root} value={root.root}>{root.root}</option>) : <option value="">No locations indexed yet</option>}
-              </select>
-              <button type="button" onClick={() => onScanNow?.(selectedScanRoot)} disabled={!selectedScanRoot || scanStarting || scanStatus?.status === "running" || scanStatus?.status === "starting"}>
+              <div className="dl-home-scan-selection-tools">
+                <span>{selectedScanRoots.length} of {(roots || []).length} selected</span>
+                <div>
+                  <button type="button" onClick={() => setSelectedScanRoots((roots || []).map((item) => item.root))} disabled={scanIsActive || scanStarting || !roots?.length}>Select all</button>
+                  <button type="button" onClick={() => setSelectedScanRoots([])} disabled={scanIsActive || scanStarting || !selectedScanRoots.length}>Clear</button>
+                </div>
+              </div>
+              <div className="dl-home-scan-root-list" role="group" aria-label="Choose one or more scan locations">
+                {(roots || []).length ? (roots || []).map((root) => (
+                  <label className={`dl-home-scan-root-option ${selectedScanRoots.includes(root.root) ? "is-selected" : ""}`} key={root.root}>
+                    <input type="checkbox" checked={selectedScanRoots.includes(root.root)} onChange={() => toggleScanRoot(root.root)} disabled={scanIsActive || scanStarting} />
+                    <span>{root.root}</span>
+                    <small>{Number(root.itemCount || 0).toLocaleString()} indexed</small>
+                  </label>
+                )) : <div className="dl-home-scan-no-roots">No locations indexed yet. Use Add folder to choose a location.</div>}
+              </div>
+              <button type="button" onClick={() => onScanNow?.(selectedScanRoots)} disabled={!selectedScanRoots.length || scanStarting || scanIsActive}>
                 <span><Icon name="scan" size={17} /></span>
-                <strong>{scanStarting || scanStatus?.status === "starting" ? "Starting…" : "Scan Now"}</strong>
+                <strong>{scanStarting || scanStatus?.status === "starting" ? "Starting…" : scanIsActive ? "Scan running…" : `Scan ${selectedScanRoots.length || "selected"} location${selectedScanRoots.length === 1 ? "" : "s"}`}</strong>
                 <Icon name="chevronRight" size={15} />
               </button>
-              {(scanStatus?.status === "running" || scanStatus?.status === "starting") && scanStatus.root === selectedScanRoot && (
+              {scanIsActive && (
                 <div className="dl-home-scan-progress" aria-live="polite">
-                  <div className="dl-home-scan-status">{scanStatus.status === "starting" ? "Starting scan…" : `Scanning ${scanStatus.root}`}</div>
-                  {Number(scanStatus.totalEstimate) > 0 ? (
-                    <>
-                      <div className="dl-home-scan-track"><span style={{ width: `${Math.min(100, (Number(scanStatus.scannedCount || 0) / Number(scanStatus.totalEstimate)) * 100)}%` }} /></div>
-                      <div className="dl-home-scan-meta">{Number(scanStatus.scannedCount || 0).toLocaleString()} / {Number(scanStatus.totalEstimate).toLocaleString()} items · {Number(scanStatus.uploadedCount || 0).toLocaleString()} uploaded</div>
-                    </>
-                  ) : <div className="dl-home-scan-meta">Estimating the number of items…</div>}
-                  <button type="button" className="dl-home-scan-cancel" onClick={() => onCancelScan?.(selectedScanRoot)}>Cancel scan</button>
+                  <div className="dl-home-scan-progress-heading">
+                    <div className="dl-home-scan-status">{scanStatus.status === "cancelling" ? "Stopping scan…" : scanStatus.status === "starting" || scanStatus.isEstimating ? "Preparing scan…" : `Scanning ${scanStatus.currentRoot || "selected locations"}`}</div>
+                    <strong>{Math.round(scanProgressPercent)}%</strong>
+                  </div>
+                  <div className={`dl-home-scan-track ${scanStatus.status === "starting" || scanStatus.isEstimating ? "is-indeterminate" : ""}`} role="progressbar" aria-label="Scan progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow={Math.round(scanProgressPercent)}>
+                    <span style={{ width: `${scanProgressPercent}%` }} />
+                  </div>
+                  <div className="dl-home-scan-meta">
+                    {Number(scanStatus.currentScannedCount || 0).toLocaleString()} / {Number(scanStatus.currentTotalEstimate || 0).toLocaleString()} items in this location · {Number(scanStatus.uploadedCount || 0).toLocaleString()} uploaded · {Number(scanStatus.completedRoots || 0)} of {Number(scanStatus.roots?.length || selectedScanRoots.length || 1)} locations complete · elapsed {formatDuration(elapsedSeconds)}{etaSeconds !== null ? ` · about ${formatDuration(etaSeconds)} left` : ""}
+                  </div>
+                  {scanStatus.rootStatuses?.length > 1 && <div className="dl-home-scan-root-progress">
+                    {scanStatus.rootStatuses.map((entry) => <div key={entry.root}><span>{entry.root}</span><strong>{entry.status === "completed" ? "Done" : entry.status === "running" ? `${Math.round(entry.progressPercent || 0)}%` : entry.status === "cancelling" ? "Stopping" : entry.status === "aborted" ? "Cancelled" : "Queued"}</strong></div>)}
+                  </div>}
+                  <button type="button" className="dl-home-scan-cancel" onClick={() => onCancelScan?.(scanStatus.roots || selectedScanRoots)} disabled={scanStatus.status === "cancelling"}>{scanStatus.status === "cancelling" ? "Stopping…" : "Cancel scan"}</button>
                 </div>
               )}
-              {scanStatus?.root === selectedScanRoot && ["completed", "aborted", "interrupted", "failed"].includes(scanStatus.status) && (
+              {scanStatus && ["completed", "aborted", "interrupted", "failed"].includes(scanStatus.status) && (
                 <div className={`dl-home-scan-result ${scanStatus.status === "completed" ? "is-complete" : "is-warning"}`}>
-                  {scanStatus.status === "completed" ? `Scan complete · ${Number(scanStatus.itemCount || scanStatus.scannedCount || 0).toLocaleString()} indexed` : scanStatus.status === "aborted" ? "Scan cancelled. Previous index was kept." : scanStatus.status === "failed" ? "Scan could not be started." : "Scan was interrupted. Previous index was kept."}
+                  {scanStatus.status === "completed" ? `Scan complete · ${Number(scanStatus.scannedCount || 0).toLocaleString()} items indexed across ${scanStatus.roots?.length || 1} location${scanStatus.roots?.length === 1 ? "" : "s"}.` : scanStatus.status === "aborted" ? "Scan cancelled. The previous completed index was kept." : scanStatus.status === "failed" ? "Scan could not be started." : "Scan was interrupted. The previous completed index was kept."}
                 </div>
               )}
               {scanError && <div className="dl-home-scan-error">{scanError}</div>}
             </div>
-            <button onClick={() => onOpenRoot(selectedScanRoot)} disabled={!selectedScanRoot}>
+            <button onClick={() => onOpenRoot(selectedScanRoots[0] || roots?.[0]?.root)} disabled={!selectedScanRoots.length && !roots?.length}>
               <span><Icon name="folder" size={17} /></span>
               <strong>Browse Storage</strong>
               <Icon name="chevronRight" size={15} />
@@ -553,6 +619,17 @@ export default function HomeDashboard({
                 </div>
               </div>
             </div>
+          </section>
+
+          <section className="dl-home-panel dl-home-scan-history">
+            <div className="dl-home-panel-head"><div><h2>Recent scans</h2><p>Saved scan outcomes for the indexed locations.</p></div></div>
+            {scanHistoryError ? <div className="dl-home-empty">Scan history is unavailable.</div> : scanHistory.length ? scanHistory.map((run) => (
+              <div className="dl-home-scan-history-row" key={run.scanId}>
+                <div><strong>{run.root}</strong><small>{run.completedAt ? new Date(run.completedAt).toLocaleString() : new Date(run.startedAt).toLocaleString()}</small></div>
+                <span className={`status-${run.status}`}>{run.status}</span>
+                <small>{Number(run.itemCount || 0).toLocaleString()} items · {formatBytes(run.indexedBytes || 0)} indexed · +{Number(run.addedCount || 0).toLocaleString()} ~{Number(run.changedCount || 0).toLocaleString()} −{Number(run.removedCount || 0).toLocaleString()} · {Number(run.skippedCount || 0).toLocaleString()} skipped{run.fingerprintMatchesPrevious === true ? " · snapshot matches prior scan" : run.fingerprintMatchesPrevious === false ? " · snapshot differs from prior scan" : ""}</small>
+              </div>
+            )) : <div className="dl-home-empty">No scans have been recorded yet.</div>}
           </section>
         </aside>
 

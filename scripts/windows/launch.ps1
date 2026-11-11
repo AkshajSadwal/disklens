@@ -5,7 +5,7 @@ function Ensure-NodeRuntime {
   if ($nodeCommand) {
     try {
       $versionText = (& node -p "process.versions.node").Trim()
-      if ([version]$versionText -ge [version]"20.0.0") { return }
+      if ([version]$versionText -ge [version]"22.0.0") { return }
     } catch {}
   }
 

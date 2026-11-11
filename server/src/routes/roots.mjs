@@ -1,14 +1,21 @@
-function normalizeRootKey(root) {
+export function normalizeRootKey(root, platform = process.platform) {
   const original = String(root || "").trim();
-  if (original === "/" || original === "\\") return original;
-  let value = original.replace(/[\\/]+$/, "");
-  // Treat a bare Windows drive designator (C:) and its absolute root (C:\\)
-  // as the same indexed location. Keep non-drive paths case-insensitive too.
-  if (/^[a-zA-Z]:$/.test(value)) value += "\\";
-  return value.toLocaleUpperCase("en-US");
+  if (!original) return "";
+  if (platform === "win32") {
+    if (original === "/" || original === "\\") return original;
+    let value = original.replace(/[\\/]+$/, "");
+    // Treat a bare Windows drive designator (C:) and its absolute root
+    // (C:\\) as the same indexed location.
+    if (/^[a-zA-Z]:$/.test(value)) value += "\\";
+    return value.toLocaleUpperCase("en-US");
+  }
+  // POSIX paths are case-sensitive (including macOS volumes formatted that
+  // way); only trailing separators are aliases on these platforms.
+  if (/^\/+$/.test(original)) return "/";
+  return original.replace(/\/+$/, "") || "/";
 }
 
-export function registerRootRoutes(app, db) {
+export function registerRootRoutes(app, db, { platform = process.platform } = {}) {
   app.get("/api/roots", async () => {
     // Include completed empty scans and registered drive roots, then merge
     // aliases such as "C:" and "C:\\". Prefer the spelling associated with
@@ -35,7 +42,7 @@ export function registerRootRoutes(app, db) {
 
     const merged = new Map();
     for (const row of rows) {
-      const key = normalizeRootKey(row.root);
+      const key = normalizeRootKey(row.root, platform);
       if (!key) continue;
       const current = merged.get(key);
       if (!current) {

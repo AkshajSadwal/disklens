@@ -4,23 +4,9 @@ import crypto from "node:crypto";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import path from "node:path";
+import { consumeAiRequest, getRuntimeAiConfig, recordAiProvider, validateProviderEndpoint } from "./aiSettings.mjs";
 
 const execFileAsync = promisify(execFile);
-
-function requiredEnv(name) {
-  const value = process.env[name]?.trim();
-  if (!value) {
-    const error = new Error(`${name} is not configured on the server.`);
-    error.code = "AI_NOT_CONFIGURED";
-    throw error;
-  }
-  return value;
-}
-
-function azureBaseUrl() {
-  const raw = requiredEnv("AZURE_OPENAI_ENDPOINT").replace(/\/$/, "");
-  return raw.endsWith("/openai/v1") ? `${raw}/` : `${raw}/openai/v1/`;
-}
 
 function extractOutputText(payload) {
   if (typeof payload?.output_text === "string" && payload.output_text.trim()) {
@@ -77,32 +63,7 @@ function parseJson(text) {
     } catch {}
   }
 
-  throw new Error("Azure OpenAI returned invalid JSON.");
-}
-
-function providerConfig() {
-  if (process.env.OPENAI_API_KEY?.trim()) {
-    return {
-      provider: "openai",
-      key: process.env.OPENAI_API_KEY.trim(),
-      model: process.env.OPENAI_MODEL?.trim() || "gpt-4.1-mini",
-    };
-  }
-  if (process.env.ANTHROPIC_API_KEY?.trim()) {
-    return {
-      provider: "anthropic",
-      key: process.env.ANTHROPIC_API_KEY.trim(),
-      model: process.env.ANTHROPIC_MODEL?.trim() || "claude-sonnet-4-20250514",
-    };
-  }
-  if (
-    process.env.AZURE_OPENAI_API_KEY?.trim() &&
-    process.env.AZURE_OPENAI_ENDPOINT?.trim() &&
-    process.env.AZURE_OPENAI_DEPLOYMENT?.trim()
-  ) {
-    return { provider: "azure-openai", key: process.env.AZURE_OPENAI_API_KEY.trim() };
-  }
-  return null;
+  throw new Error("The AI provider returned invalid structured data.");
 }
 
 function messagesToPrompt(input) {
@@ -117,99 +78,160 @@ function messagesToPrompt(input) {
   return { system, user };
 }
 
+export function buildProviderRequest(config, input, schema, maxOutputTokens) {
+  const { system, user } = messagesToPrompt(input);
+  if (config.provider === "openai") {
+    const body = {
+      model: config.model,
+      input: [...(system ? [{ role: "developer", content: system }] : []), { role: "user", content: user }],
+      max_output_tokens: maxOutputTokens,
+    };
+    if (schema) body.text = { format: { type: "json_schema", name: schema.name, strict: true, schema: schema.schema } };
+    const base = config.endpoint ? `${config.endpoint.replace(/\/$/, "")}/` : "https://api.openai.com/v1/";
+    return { url: `${base}responses`, headers: { "content-type": "application/json", authorization: `Bearer ${config.key}` }, body };
+  }
+  if (config.provider === "anthropic") {
+    const body = {
+      model: config.model,
+      max_tokens: maxOutputTokens,
+      system: system || "You are a careful defensive storage analysis assistant.",
+      messages: [{ role: "user", content: user }],
+    };
+    if (schema) body.system += `\n\nReturn only JSON matching this schema:\n${JSON.stringify(schema.schema)}`;
+    const base = config.endpoint || "https://api.anthropic.com/v1";
+    return {
+      url: `${base.replace(/\/$/, "")}/messages`,
+      headers: { "content-type": "application/json", "x-api-key": config.key, "anthropic-version": "2023-06-01" },
+      body,
+    };
+  }
+  if (config.provider === "compatible") {
+    const base = config.endpoint.replace(/\/$/, "");
+    return {
+      url: `${base}/chat/completions`,
+      headers: { "content-type": "application/json", ...(config.key ? { authorization: `Bearer ${config.key}` } : {}) },
+      body: {
+        model: config.model,
+        messages: [...(system ? [{ role: "system", content: system }] : []), { role: "user", content: user }],
+        max_tokens: maxOutputTokens,
+        response_format: schema ? { type: "json_object" } : undefined,
+      },
+    };
+  }
+  if (config.provider === "azure-openai") {
+    const body = {
+      model: config.model || process.env.AZURE_OPENAI_DEPLOYMENT?.trim(),
+      input,
+      max_output_tokens: maxOutputTokens,
+      reasoning: { effort: process.env.AZURE_OPENAI_REASONING_EFFORT?.trim() || "high" },
+      text: { verbosity: "low" },
+    };
+    if (schema) body.text.format = { type: "json_schema", name: schema.name, strict: true, schema: schema.schema };
+    const endpoint = validateProviderEndpoint(config.endpoint).replace(/\/$/, "");
+    const base = endpoint.endsWith("/openai/v1") ? `${endpoint}/` : `${endpoint}/openai/v1/`;
+    return { url: `${base}responses`, headers: { "content-type": "application/json", "api-key": config.key }, body };
+  }
+  return null;
+}
+
+function safeLocationCategory(value) {
+  const normalized = String(value || "").toLowerCase().replaceAll("\\", "/");
+  if (/(^|\/)downloads?(\/|$)/.test(normalized)) return "downloads";
+  if (/(^|\/)(temp|tmp)(\/|$)/.test(normalized)) return "temporary";
+  if (/(^|\/)cache(\/|$)/.test(normalized)) return "cache";
+  if (/(^|\/)logs?(\/|$)/.test(normalized)) return "logs";
+  if (/(^|\/)(appdata|application support|programdata)(\/|$)/.test(normalized)) return "application-data";
+  return "other";
+}
+
+function minimalHostedFileEvidence(evidence) {
+  return {
+    type: "file", extension: String(evidence.extension || "").slice(0, 24),
+    size: Math.max(0, Number(evidence.size) || 0), isExecutable: Boolean(evidence.isExecutable),
+    locationCategory: safeLocationCategory(evidence.path),
+    digitalSignature: { status: String(evidence.digitalSignature?.status || "Unknown").slice(0, 32), markOfWeb: Boolean(evidence.digitalSignature?.markOfWeb) },
+  };
+}
+
+function minimalHostedStorageSnapshot(snapshot) {
+  const entities = {};
+  for (const [type, rows] of Object.entries(snapshot?.entities || {})) {
+    entities[type] = (rows || []).slice(0, 20).map((row) => {
+      if (type === "programs") return {
+        key: row.key, type: "program", name: String(row.name || "").slice(0, 120),
+        publisher: String(row.publisher || "").slice(0, 100), version: String(row.version || "").slice(0, 60),
+        size: Math.max(0, Number(row.size) || 0), sizeBasis: row.sizeBasis,
+      };
+      if (type === "files") return {
+        key: row.key, type: "file", extension: path.extname(String(row.name || "")).slice(0, 24),
+        size: Math.max(0, Number(row.size) || 0), locationCategory: safeLocationCategory(row.path),
+        modifiedAt: String(row.modifiedAt || "").slice(0, 24),
+      };
+      return {
+        key: row.key, type: "folder", size: Math.max(0, Number(row.size) || 0),
+        fileCount: Math.max(0, Number(row.fileCount) || 0), folderCount: Math.max(0, Number(row.folderCount) || 0),
+        sizeBasis: row.sizeBasis, locationCategory: safeLocationCategory(row.path),
+      };
+    });
+  }
+  return { indexedFileCount: Math.max(0, Number(snapshot?.indexedFileCount) || 0), entities };
+}
+
+function minimalHostedTarget(target) {
+  if (target.type === "program") return {
+    type: "program", name: String(target.name || "").slice(0, 120), publisher: String(target.publisher || "").slice(0, 100),
+    version: String(target.version || "").slice(0, 60), size: Math.max(0, Number(target.size) || 0), sizeBasis: target.sizeBasis,
+    indexedFileCount: Math.max(0, Number(target.fileCount) || 0),
+  };
+  if (target.type === "file") return {
+    type: "file", extension: path.extname(String(target.name || "")).slice(0, 24),
+    size: Math.max(0, Number(target.size) || 0), modifiedAt: String(target.modifiedAt || "").slice(0, 24),
+    locationCategory: safeLocationCategory(target.path),
+  };
+  return {
+    type: "folder", size: Math.max(0, Number(target.size) || 0),
+    fileCount: Math.max(0, Number(target.fileCount) || 0), folderCount: Math.max(0, Number(target.folderCount) || 0),
+    sizeBasis: target.sizeBasis, locationCategory: safeLocationCategory(target.path),
+  };
+}
+
 async function requestModel(input, schema, maxOutputTokens = 8000) {
-  const config = providerConfig();
-  if (!config) {
+  const config = await getRuntimeAiConfig();
+  if (config.provider === "local-rules") {
     const error = new Error("No hosted AI provider is configured.");
     error.code = "AI_NOT_CONFIGURED";
     throw error;
   }
+  if (!config.key && config.provider !== "compatible") {
+    const error = new Error("The configured AI credential is unavailable from the operating system credential store.");
+    error.code = "AI_NOT_CONFIGURED";
+    throw error;
+  }
+  await consumeAiRequest();
+  maxOutputTokens = Math.min(maxOutputTokens, config.maxResponseTokens || maxOutputTokens);
 
   const { system, user } = messagesToPrompt(input);
+  if (Buffer.byteLength(system) + Buffer.byteLength(user) > 32 * 1024) {
+    const error = new Error("This AI request exceeds the local input budget and was not sent.");
+    error.code = "AI_INPUT_BUDGET_EXCEEDED";
+    throw error;
+  }
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 60_000);
 
   try {
-    let response;
-    if (config.provider === "openai") {
-      const body = {
-        model: config.model,
-        input: [
-          ...(system ? [{ role: "developer", content: system }] : []),
-          { role: "user", content: user },
-        ],
-        max_output_tokens: maxOutputTokens,
-      };
-      if (schema) {
-        body.text = {
-          format: {
-            type: "json_schema",
-            name: schema.name,
-            strict: true,
-            schema: schema.schema,
-          },
-        };
-      }
-      response = await fetch("https://api.openai.com/v1/responses", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          authorization: `Bearer ${config.key}`,
-        },
-        body: JSON.stringify(body),
-        signal: controller.signal,
-      });
-    } else if (config.provider === "anthropic") {
-      const body = {
-        model: config.model,
-        max_tokens: maxOutputTokens,
-        system: system || "You are a careful defensive storage analysis assistant.",
-        messages: [{ role: "user", content: user }],
-      };
-      if (schema) {
-        body.system += `\n\nReturn only JSON matching this schema:\n${JSON.stringify(schema.schema)}`;
-      }
-      response = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "x-api-key": config.key,
-          "anthropic-version": "2023-06-01",
-        },
-        body: JSON.stringify(body),
-        signal: controller.signal,
-      });
-    } else {
-      const body = {
-        model: process.env.AZURE_OPENAI_DEPLOYMENT.trim(),
-        input,
-        max_output_tokens: maxOutputTokens,
-        reasoning: { effort: process.env.AZURE_OPENAI_REASONING_EFFORT?.trim() || "high" },
-        text: { verbosity: "low" },
-      };
-      if (schema) {
-        body.text.format = {
-          type: "json_schema",
-          name: schema.name,
-          strict: true,
-          schema: schema.schema,
-        };
-      }
-      const endpoint = process.env.AZURE_OPENAI_ENDPOINT.trim().replace(/\/$/, "");
-      const base = endpoint.endsWith("/openai/v1") ? `${endpoint}/` : `${endpoint}/openai/v1/`;
-      response = await fetch(`${base}responses`, {
-        method: "POST",
-        headers: { "content-type": "application/json", "api-key": config.key },
-        body: JSON.stringify(body),
-        signal: controller.signal,
-      });
-    }
+    const providerRequest = buildProviderRequest(config, input, schema, maxOutputTokens);
+    if (!providerRequest) throw new Error("The configured AI provider is not supported.");
+    const response = await fetch(providerRequest.url, {
+      method: "POST",
+      headers: providerRequest.headers,
+      body: JSON.stringify(providerRequest.body),
+      signal: controller.signal,
+    });
 
     const payload = await response.json().catch(() => null);
     if (!response.ok) {
-      const error = new Error(
-        payload?.error?.message || payload?.message || `${config.provider} returned HTTP ${response.status}`,
-      );
+      const error = new Error(`${config.provider} returned HTTP ${response.status}.`);
       error.status = response.status;
       error.provider = config.provider;
       throw error;
@@ -221,10 +243,13 @@ async function requestModel(input, schema, maxOutputTokens = 8000) {
         .filter((part) => part.type === "text")
         .map((part) => part.text)
         .join("\n").trim();
+    } else if (config.provider === "compatible") {
+      outputText = payload?.choices?.[0]?.message?.content?.trim?.() || "";
     } else {
       outputText = extractOutputText(payload);
     }
     if (!outputText) throw new Error(`${config.provider} returned an empty response.`);
+    await recordAiProvider(config.provider);
     return { text: outputText, provider: config.provider };
   } finally {
     clearTimeout(timeout);
@@ -340,6 +365,9 @@ async function askJson(input, schema, maxOutputTokens = 8000, kind = "storage-ta
   } catch (error) {
     // A configured provider that is unavailable falls back to local heuristics.
     // No API key is required for the fallback path.
+    const config = await getRuntimeAiConfig();
+    if (!config.localFallback) throw error;
+    await recordAiProvider("local-rules");
     return localRuleAnalysis(kind, fallbackData);
   }
 }
@@ -497,17 +525,25 @@ export async function collectFileEvidence(item) {
   return evidence;
 }
 
-export async function analyzeFileWithAI(evidence) {
-  return askJson([
+export function buildFileInput(evidence) {
+  const hostedEvidence = minimalHostedFileEvidence(evidence);
+  const messages = [
     {
       role: "developer",
-      content: `You are DiskLens AI, a defensive local-storage assistant. Analyze the supplied file evidence for security risk. Never claim certainty about malware from limited static evidence. Distinguish danger from ownership and deletion safety. A suspicious file should not be recommended for deletion merely because it is suspicious; recommend scanning/quarantine instead. Treat digital signatures as evidence, not proof of safety. Sensitive content may already be redacted. Return conservative, actionable results.\n\nFILE EVIDENCE:\n${JSON.stringify(evidence)}`,
+      content: `You are DiskLens AI, a defensive local-storage assistant. Analyze the supplied metadata for security risk. Never claim certainty about malware from limited static evidence. Distinguish danger from ownership and deletion safety. A suspicious file should not be recommended for deletion merely because it is suspicious; recommend scanning/quarantine instead. Treat digital signatures as evidence, not proof of safety. The evidence is metadata only; no path, filename, file contents, or file hash is supplied. Return conservative, actionable results.\n\nFILE METADATA:\n${JSON.stringify(hostedEvidence)}`,
     },
     {
       role: "user",
       content: "Assess the file's danger level and give deletion guidance.",
     },
-  ], fileSchema, 5000, "file", evidence);
+  ];
+  const responseSchema = fileSchema;
+  const serialized = JSON.stringify({ messages, responseSchema });
+  return { messages, responseSchema, inputBytes: Buffer.byteLength(serialized), estimatedInputTokens: Math.ceil(Buffer.byteLength(serialized) / 4) };
+}
+
+export async function analyzeFileWithAI(evidence) {
+  return askJson(buildFileInput(evidence).messages, fileSchema, 5000, "file", evidence);
 }
 
 const storageTopSchema = {
@@ -575,33 +611,47 @@ const storageTargetSchema = {
   },
 };
 
-export async function analyzeStorageTopWithAI(snapshot) {
-  return askJson([
+export function buildStorageTopInput(snapshot) {
+  const messages = [
     {
       role: "developer",
-      content: `You are DiskLens AI, a defensive local-storage optimization assistant. The user asked you to review only the supplied TOP storage entities. You must not assume that a large item is useless. Identify things worth reviewing for storage optimization: old installers/downloads, caches, logs, temporary data, duplicate-looking archives, oversized forgotten files, or application data that is likely safe to regenerate. Prefer evidence from type, size, path, name, modification time, program install metadata, and size basis. Never invent paths or claims. Do not recommend deleting Windows/system files, dependencies, shared libraries, or personal data merely because they are large. Treat recommendations as review suggestions, not automatic deletion instructions. targetKeys must reference only the supplied entity keys. Estimated bytes are rough reviewable amounts, not guaranteed recoverable space. Return concise results.
+      content: `You are DiskLens AI, a defensive local-storage optimization assistant. Review only the supplied top storage summaries. Do not assume large items are useless. Use only supplied type, extension, size, coarse location category, age, and program size metadata. Never infer or invent filenames, paths, or personal data. Do not recommend deleting system files, dependencies, shared libraries, or personal data merely because they are large. Suggestions are review-only and never execute actions. targetKeys must reference supplied entity keys. Estimated bytes are rough review amounts, not guaranteed recoverable space. Return concise results.
 
-TOP STORAGE EVIDENCE:\n${JSON.stringify(snapshot)}`,
+TOP STORAGE SUMMARIES:\n${JSON.stringify(minimalHostedStorageSnapshot(snapshot))}`,
     },
     {
       role: "user",
       content: "Suggest the most useful storage optimization opportunities in the supplied top items. Explain what should be reviewed and why.",
     },
-  ], storageTopSchema, 6500, "storage-top", snapshot);
+  ];
+  const responseSchema = storageTopSchema;
+  const serialized = JSON.stringify({ messages, responseSchema });
+  return { messages, responseSchema, inputBytes: Buffer.byteLength(serialized), estimatedInputTokens: Math.ceil(Buffer.byteLength(serialized) / 4) };
 }
 
-export async function analyzeStorageTargetWithAI(target) {
-  return askJson([
+export async function analyzeStorageTopWithAI(snapshot) {
+  return askJson(buildStorageTopInput(snapshot).messages, storageTopSchema, 6500, "storage-top", snapshot);
+}
+
+export function buildStorageTargetInput(target) {
+  const messages = [
     {
       role: "developer",
-      content: `You are DiskLens AI, a defensive local-storage optimization assistant. Analyze ONLY the selected storage target. The target can be one program, one file, or one folder. Explain whether its storage footprint appears justified, what parts are worth reviewing, and what actions could reclaim space. Do not call anything useless with certainty. Never invent data or paths. Do not recommend deleting system files, dependencies, shared libraries, or personal data merely because they are large. For programs, distinguish installed size from indexed size basis. For folders, use fileCount/folderCount and indexed descendant size. For files, consider size, type, and age. Suggestions are advisory and require user review. Return concise results.
+      content: `You are DiskLens AI, a defensive local-storage optimization assistant. Analyze only the selected target summary. Explain the supplied footprint, what may be worth reviewing, and possible actions. Do not call anything useless with certainty or invent paths, filenames, or contents. For programs distinguish installed estimates from indexed size. For folders use supplied descendant counts and size. Suggestions are advisory and require user review. Return concise results.
 
-SELECTED TARGET:\n${JSON.stringify(target)}`,
+SELECTED SUMMARY:\n${JSON.stringify(minimalHostedTarget(target))}`,
     },
     {
       role: "user",
       content: "Give storage optimization advice specifically for this selected target.",
     },
-  ], storageTargetSchema, 5000, "storage-target", target);
+  ];
+  const responseSchema = storageTargetSchema;
+  const serialized = JSON.stringify({ messages, responseSchema });
+  return { messages, responseSchema, inputBytes: Buffer.byteLength(serialized), estimatedInputTokens: Math.ceil(Buffer.byteLength(serialized) / 4) };
+}
+
+export async function analyzeStorageTargetWithAI(target) {
+  return askJson(buildStorageTargetInput(target).messages, storageTargetSchema, 5000, "storage-target", target);
 }
 

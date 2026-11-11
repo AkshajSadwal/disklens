@@ -6,7 +6,10 @@ import Icon from "./common/Icon";
 import Detail from "./Detail";
 import DeleteDialog from "./files/DeleteDialog";
 import ProgramCleanupPanel from "./programs/ProgramCleanupPanel";
+import CleanupRecommendationsPanel from "./programs/CleanupRecommendationsPanel";
 import AiStoragePanel from "./ai/AiStoragePanel";
+import AISettingsPanel from "./settings/AISettingsPanel";
+import UpdateCheckPanel from "./settings/UpdateCheckPanel";
 import Sidebar from "./common/Sidebar";
 import HomeDashboard from "./HomeDashboard";
 import StorageExplorerView from "./StorageExplorerView";
@@ -34,6 +37,7 @@ export default function DiskLensApp() {
   const [scanError, setScanError] = useState("");
   const [scanStarting, setScanStarting] = useState(false);
   const [lastRefreshedScanId, setLastRefreshedScanId] = useState(null);
+  const [cleanupMode, setCleanupMode] = useState("programs");
 
   const totalSize = useMemo(
     () => folderItems.reduce((sum, item) => sum + Number(item.size || 0), 0),
@@ -79,39 +83,87 @@ export default function DiskLensApp() {
   }, [refreshTick]);
 
   useEffect(() => {
-    const root = scanStatus?.root;
-    if (!root || ["completed", "aborted", "interrupted", "failed"].includes(scanStatus?.status)) return;
+    const scanRoots = Array.isArray(scanStatus?.roots) ? scanStatus.roots : [];
+    if (!scanRoots.length || ["completed", "aborted", "interrupted", "failed"].includes(scanStatus?.status)) return undefined;
     let cancelled = false;
+
     async function pollScan() {
       try {
-        const response = await fetch(`${API}/api/scans/status?root=${encodeURIComponent(root)}`);
-        const data = await response.json().catch(() => null);
-        if (!response.ok || cancelled) return;
-        if (!data?.scan) {
-          setScanStatus((previous) => previous?.status === "starting"
-            ? { ...previous, status: "failed" }
-            : previous);
-          return;
-        }
-        const next = data.scan;
-        setScanStatus((previous) => {
-          if (previous && previous.scanId === next.scanId && previous.status === next.status &&
-              previous.scannedCount === next.scannedCount && previous.uploadedCount === next.uploadedCount &&
-              previous.skippedCount === next.skippedCount && previous.totalEstimate === next.totalEstimate) return previous;
-          return next;
+        const responses = await Promise.all(scanRoots.map(async (root) => {
+          const response = await fetch(`${API}/api/scans/status?root=${encodeURIComponent(root)}`);
+          const data = await response.json().catch(() => null);
+          if (!response.ok) throw new Error(data?.error || `Scan status request failed (${response.status}).`);
+          return { root, scan: data?.scan || null };
+        }));
+        if (cancelled) return;
+
+        const rootStatuses = responses.map(({ root, scan }) => {
+          const row = scan || { root, status: scanStatus?.status === "cancelling" ? "aborted" : "starting", scannedCount: 0, uploadedCount: 0, skippedCount: 0, totalEstimate: 0 };
+          const totalEstimate = Number(row.totalEstimate || 0);
+          const scannedCount = Number(row.scannedCount || 0);
+          return {
+            ...row,
+            root,
+            progressPercent: totalEstimate > 0 ? Math.min(100, Math.max(0, scannedCount / totalEstimate * 100)) : row.status === "completed" ? 100 : 0,
+          };
         });
-        if (next.status === "completed" && next.scanId && next.scanId !== lastRefreshedScanId) {
-          setLastRefreshedScanId(next.scanId);
-          setRefreshTick((value) => value + 1);
+        const completedRoots = rootStatuses.filter((row) => row.status === "completed").length;
+        const activeRow = rootStatuses.find((row) => ["running", "cancelling"].includes(row.status))
+          || rootStatuses.find((row) => row.status === "starting")
+          || null;
+        const currentProgress = activeRow?.progressPercent || 0;
+        const progressPercent = scanRoots.length
+          ? Math.min(100, ((completedRoots + currentProgress / 100) / scanRoots.length) * 100)
+          : 0;
+        const totalScanned = rootStatuses.reduce((sum, row) => sum + Number(row.scannedCount || 0), 0);
+        const totalUploaded = rootStatuses.reduce((sum, row) => sum + Number(row.uploadedCount || 0), 0);
+        const totalSkipped = rootStatuses.reduce((sum, row) => sum + Number(row.skippedCount || 0), 0);
+        const allCompleted = completedRoots === scanRoots.length;
+        const anyCancelling = rootStatuses.some((row) => row.status === "cancelling");
+        const anyAborted = rootStatuses.some((row) => ["aborted", "interrupted"].includes(row.status));
+        const anyFailed = rootStatuses.some((row) => row.status === "failed");
+        const nextStatus = anyCancelling ? "cancelling"
+          : allCompleted ? "completed"
+          : anyAborted ? "aborted"
+          : anyFailed ? "failed"
+          : "running";
+
+        const next = {
+          roots: scanRoots,
+          rootStatuses,
+          startedAt: activeRow?.startedAt || scanStatus?.startedAt || null,
+          currentRoot: activeRow?.root || scanRoots.find((root) => !rootStatuses.some((row) => row.root === root && row.status === "completed")) || scanRoots[0],
+          status: nextStatus,
+          scannedCount: totalScanned,
+          uploadedCount: totalUploaded,
+          skippedCount: totalSkipped,
+          totalEstimate: Number(activeRow?.totalEstimate || 0),
+          currentScannedCount: Number(activeRow?.scannedCount || 0),
+          currentTotalEstimate: Number(activeRow?.totalEstimate || 0),
+          currentProgressPercent: currentProgress,
+          progressPercent: allCompleted ? 100 : progressPercent,
+          completedRoots,
+          isEstimating: Boolean(activeRow && (activeRow.status === "starting" || (activeRow.status === "running" && !Number(activeRow.totalEstimate)))),
+          scanId: rootStatuses.map((row) => row.scanId || row.status).join("|")
+        };
+        setScanStatus(next);
+
+        if (allCompleted) {
+          const completionKey = scanRoots.join("|");
+          if (completionKey !== lastRefreshedScanId) {
+            setLastRefreshedScanId(completionKey);
+            setRefreshTick((value) => value + 1);
+          }
         }
       } catch (err) {
         if (!cancelled) setScanError(err.message);
       }
     }
+
     pollScan();
-    const timer = setInterval(pollScan, 1200);
+    const timer = setInterval(pollScan, 1000);
     return () => { cancelled = true; clearInterval(timer); };
-  }, [scanStatus?.root, scanStatus?.status, lastRefreshedScanId]);
+  }, [scanStatus?.roots?.join("|"), scanStatus?.status, lastRefreshedScanId]);
 
   async function pickScanLocation() {
     setScanError("");
@@ -131,20 +183,35 @@ export default function DiskLensApp() {
     }
   }
 
-  async function startScan(root) {
-    if (!root || scanStarting || scanStatus?.status === "running" || scanStatus?.status === "starting") return;
+  async function startScan(rootsToScan) {
+    const requestedRoots = [...new Set((Array.isArray(rootsToScan) ? rootsToScan : [rootsToScan]).filter(Boolean))];
+    if (!requestedRoots.length || scanStarting || ["running", "starting", "cancelling"].includes(scanStatus?.status)) return;
     setScanStarting(true);
     setScanError("");
-    setScanStatus({ root, status: "starting", scannedCount: 0, uploadedCount: 0, skippedCount: 0, totalEstimate: 0 });
+    setLastRefreshedScanId(null);
+    setScanStatus({
+      roots: requestedRoots,
+      startedAt: new Date().toISOString(),
+      rootStatuses: requestedRoots.map((root) => ({ root, status: "starting", scannedCount: 0, uploadedCount: 0, skippedCount: 0, totalEstimate: 0, progressPercent: 0 })),
+      currentRoot: requestedRoots[0],
+      status: "starting",
+      scannedCount: 0,
+      uploadedCount: 0,
+      skippedCount: 0,
+      totalEstimate: 0,
+      progressPercent: 0,
+      completedRoots: 0,
+    });
     try {
       const response = await fetch(`${API}/api/scans/run`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ root, addNewRoot: true }),
+        body: JSON.stringify({ roots: requestedRoots, addNewRoot: true }),
       });
       const data = await response.json().catch(() => null);
       if (!response.ok) throw new Error(data?.error || `Could not start scan (${response.status}).`);
-      setScanStatus((previous) => previous ? { ...previous, status: "starting", root: data.root || root } : previous);
+      const actualRoots = Array.isArray(data?.roots) ? data.roots : requestedRoots;
+      setScanStatus((previous) => previous ? { ...previous, roots: actualRoots, currentRoot: actualRoots[0], status: "starting" } : previous);
     } catch (err) {
       setScanError(err.message);
       setScanStatus((previous) => previous ? { ...previous, status: "failed" } : previous);
@@ -153,15 +220,22 @@ export default function DiskLensApp() {
     }
   }
 
-  async function cancelScan(root) {
+  async function cancelScan(rootsToCancel) {
+    const targetRoots = Array.isArray(rootsToCancel) ? rootsToCancel : [rootsToCancel].filter(Boolean);
+    if (!targetRoots.length) return;
+    setScanStatus((previous) => previous ? { ...previous, status: "cancelling" } : previous);
+    setScanError("");
     try {
       const response = await fetch(`${API}/api/scans/cancel`, {
         method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ root }),
+        body: JSON.stringify({ roots: targetRoots }),
       });
       const data = await response.json().catch(() => null);
       if (!response.ok) throw new Error(data?.error || `Could not cancel scan (${response.status}).`);
-    } catch (err) { setScanError(err.message); }
+    } catch (err) {
+      setScanError(err.message);
+      setScanStatus((previous) => previous ? { ...previous, status: "running" } : previous);
+    }
   }
 
   useEffect(() => {
@@ -405,11 +479,17 @@ export default function DiskLensApp() {
 
         {view === "programs" && (
           <div className="dl-feature-page">
-            <ProgramCleanupPanel
-              embedded
-              onClose={() => setView("home")}
+            <div className="dl-cleanup-tabs" role="tablist" aria-label="Cleanup tools">
+              <button type="button" role="tab" aria-selected={cleanupMode === "programs"} className={cleanupMode === "programs" ? "active" : ""} onClick={() => setCleanupMode("programs")}>Installed programs</button>
+              <button type="button" role="tab" aria-selected={cleanupMode === "files"} className={cleanupMode === "files" ? "active" : ""} onClick={() => setCleanupMode("files")}>File cleanup &amp; duplicates</button>
+            </div>
+            {cleanupMode === "programs" ? <ProgramCleanupPanel
+              embedded onClose={() => setView("home")}
               onReviewDelete={(items) => setDeleteItems(items)}
-            />
+            /> : <CleanupRecommendationsPanel
+              refreshTick={refreshTick}
+              onReviewDelete={(items) => setDeleteItems(items)}
+            />}
           </div>
         )}
 
@@ -420,10 +500,10 @@ export default function DiskLensApp() {
         )}
 
         {view === "settings" && (
-          <div className="dl-page dl-placeholder-page">
-            <div className="dl-eyebrow">PREFERENCES</div>
-            <h1>Settings</h1>
-            <p>Settings will be added after the core storage features are complete.</p>
+          <div className="dl-feature-page dl-settings-page">
+            <div className="dl-page-head"><div><div className="dl-eyebrow">PREFERENCES</div><h1>Settings</h1><p>Manage optional AI access and local cost controls.</p></div></div>
+            <AISettingsPanel />
+            <UpdateCheckPanel />
           </div>
         )}
       </main>

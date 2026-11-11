@@ -4,6 +4,10 @@ import { SERVER } from "./config.mjs";
 import { getDriveMetadata } from "./driveMetadata.mjs";
 import { scanRoot } from "./scanner.mjs";
 import { uploadDriveMetadata } from "./uploader.mjs";
+import { bindCancellationInput } from "./control.mjs";
+import { requireSupportedNodeRuntime } from "../../shared/nodeRuntime.mjs";
+
+requireSupportedNodeRuntime("DiskLens collector");
 
 const roots = process.argv.slice(2).map((value) => value.trim()).filter(Boolean);
 if (roots.length === 0) {
@@ -13,12 +17,26 @@ if (roots.length === 0) {
 
 const controller = new AbortController();
 let interrupted = false;
-process.once("SIGINT", () => {
+function requestCancellation() {
+  if (interrupted) return;
   interrupted = true;
   controller.abort();
-  if (process.stdout.isTTY) process.stdout.write("\nCancellation requested; preserving the last completed index...\n");
-  else console.log("Cancellation requested; preserving the last completed index...");
+  const message = "\nCancellation requested; preserving the last completed index...\n";
+  if (process.stdout.isTTY) process.stdout.write(message);
+  else console.log(message.trim());
+}
+
+// The server controls the collector through stdin. This works consistently on
+// Windows, where child-process SIGINT delivery is not reliable.
+const cancellationChannel = bindCancellationInput(process.stdin, controller, () => {
+  interrupted = true;
+  const message = "\nCancellation requested; preserving the last completed index...\n";
+  if (process.stdout.isTTY) process.stdout.write(message);
+  else console.log(message.trim());
 });
+process.once("SIGINT", requestCancellation);
+process.once("SIGTERM", requestCancellation);
+process.once("SIGBREAK", requestCancellation);
 
 function formatDuration(seconds) {
   const value = Math.max(0, Math.floor(Number(seconds) || 0));
@@ -59,10 +77,11 @@ for (const inputRoot of roots) {
   if (interrupted) break;
   const root = path.resolve(inputRoot);
   try {
-    const drive = await getDriveMetadata(root);
+    console.log(`DISKLENS_SCAN_START:${JSON.stringify(root)}`);
+    const drive = await getDriveMetadata(root, { signal: controller.signal });
     console.log(`\n${drive.root} → ${drive.volumeName || "Local Disk"}`);
     console.log(`Capacity: ${drive.totalBytes} bytes | Free: ${drive.freeBytes} bytes | Filesystem: ${drive.fileSystem}`);
-    await uploadDriveMetadata({ server: SERVER, drive }).catch((error) => {
+    await uploadDriveMetadata({ server: SERVER, drive, signal: controller.signal }).catch((error) => {
       console.warn(`Could not upload drive metadata: ${error.message}`);
     });
   } catch (error) {
@@ -71,6 +90,7 @@ for (const inputRoot of roots) {
 
   try {
     await scanRoot({ root, server: SERVER, stats, signal: controller.signal });
+    console.log(`DISKLENS_SCAN_COMPLETE:${JSON.stringify(root)}`);
     if (process.stdout.isTTY) process.stdout.write("\n");
   } catch (error) {
     if (error?.name === "AbortError" || interrupted) break;
@@ -88,3 +108,5 @@ console.log(`Items skipped or partially inaccessible: ${stats.skippedItems.toLoc
 console.log(`Private credential/config entries excluded: ${stats.privacyExcludedItems.toLocaleString()}`);
 console.log(`Elapsed: ${elapsedSeconds} seconds`);
 if (interrupted) process.exitCode = 130;
+// Do not leave a piped stdin handle keeping the collector alive after the run.
+cancellationChannel.dispose();

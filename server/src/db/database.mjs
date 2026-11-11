@@ -28,6 +28,10 @@ export function createDatabase(filename = process.env.DISKLENS_DB_PATH || "diskl
     CREATE INDEX IF NOT EXISTS idx_items_scan_id ON items(scan_id);
     CREATE INDEX IF NOT EXISTS idx_items_root ON items(root);
     CREATE INDEX IF NOT EXISTS idx_items_path ON items(path);
+    CREATE INDEX IF NOT EXISTS idx_items_path_nocase ON items(path COLLATE NOCASE);
+    CREATE INDEX IF NOT EXISTS idx_items_root_path ON items(root, path);
+    CREATE INDEX IF NOT EXISTS idx_items_name_nocase ON items(name COLLATE NOCASE, id);
+    CREATE INDEX IF NOT EXISTS idx_items_type_name_nocase ON items(type, name COLLATE NOCASE, id);
     CREATE INDEX IF NOT EXISTS idx_items_size ON items(type, size DESC);
     -- Program size aggregation uses case-insensitive path-prefix lookups.
     -- A composite index keeps each installed-program lookup bounded instead
@@ -57,11 +61,19 @@ export function createDatabase(filename = process.env.DISKLENS_DB_PATH || "diskl
       started_at TEXT NOT NULL,
       completed_at TEXT,
       item_count INTEGER NOT NULL DEFAULT 0,
+      indexed_bytes INTEGER NOT NULL DEFAULT 0,
+      added_count INTEGER NOT NULL DEFAULT 0,
+      changed_count INTEGER NOT NULL DEFAULT 0,
+      unchanged_count INTEGER NOT NULL DEFAULT 0,
+      removed_count INTEGER NOT NULL DEFAULT 0,
+      preserved_count INTEGER NOT NULL DEFAULT 0,
       scanned_count INTEGER NOT NULL DEFAULT 0,
       uploaded_count INTEGER NOT NULL DEFAULT 0,
       skipped_count INTEGER NOT NULL DEFAULT 0,
       total_estimate INTEGER NOT NULL DEFAULT 0,
-      progress_updated_at TEXT
+      progress_updated_at TEXT,
+      root_fingerprint TEXT,
+      fingerprint_matches_previous INTEGER
     );
     CREATE INDEX IF NOT EXISTS idx_scan_runs_root ON scan_runs(root, status);
 
@@ -79,6 +91,21 @@ export function createDatabase(filename = process.env.DISKLENS_DB_PATH || "diskl
       error_code TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_staged_scan_id ON staged_items(scan_id);
+    CREATE INDEX IF NOT EXISTS idx_staged_scan_path ON staged_items(scan_id, root, path);
+
+    CREATE TABLE IF NOT EXISTS cleanup_actions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      action_id TEXT NOT NULL,
+      item_id INTEGER,
+      root TEXT NOT NULL DEFAULT '',
+      path TEXT NOT NULL,
+      item_name TEXT NOT NULL DEFAULT '',
+      mode TEXT NOT NULL,
+      outcome TEXT NOT NULL,
+      error TEXT,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_cleanup_actions_created ON cleanup_actions(created_at DESC, id DESC);
   `);
 
   // Upgrade databases created before access-state metadata was added. The old
@@ -94,11 +121,19 @@ export function createDatabase(filename = process.env.DISKLENS_DB_PATH || "diskl
   // Upgrade databases created before progress tracking was added.
   const scanRunColumns = new Set(db.pragma("table_info(scan_runs)").map((column) => column.name));
   for (const [column, definition] of Object.entries({
+    indexed_bytes: "INTEGER NOT NULL DEFAULT 0",
+    added_count: "INTEGER NOT NULL DEFAULT 0",
+    changed_count: "INTEGER NOT NULL DEFAULT 0",
+    unchanged_count: "INTEGER NOT NULL DEFAULT 0",
+    removed_count: "INTEGER NOT NULL DEFAULT 0",
+    preserved_count: "INTEGER NOT NULL DEFAULT 0",
     scanned_count: "INTEGER NOT NULL DEFAULT 0",
     uploaded_count: "INTEGER NOT NULL DEFAULT 0",
     skipped_count: "INTEGER NOT NULL DEFAULT 0",
     total_estimate: "INTEGER NOT NULL DEFAULT 0",
     progress_updated_at: "TEXT",
+    root_fingerprint: "TEXT",
+    fingerprint_matches_previous: "INTEGER",
   })) {
     if (!scanRunColumns.has(column)) db.exec(`ALTER TABLE scan_runs ADD COLUMN ${column} ${definition}`);
   }

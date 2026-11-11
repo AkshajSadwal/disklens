@@ -1,0 +1,43 @@
+name: DiskLens source package
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  source-package:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            server/package-lock.json
+            frontend/package-lock.json
+      - name: Install server dependencies
+        run: npm ci --no-audit --no-fund
+        working-directory: server
+      - name: Run bounded tests
+        run: npm test
+        working-directory: server
+      - name: Install frontend dependencies
+        run: npm ci --no-audit --no-fund
+        working-directory: frontend
+      - name: Build frontend
+        run: npm run build
+        working-directory: frontend
+      - name: Package versioned source archive
+        run: node scripts/package-source.mjs --out "$RUNNER_TEMP/package" --tag "$GITHUB_REF_NAME"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DiskLens-${{ github.ref_name }}-source
+          path: ${{ runner.temp }}/package/*.tar.gz
+          if-no-files-found: error
+          retention-days: 30

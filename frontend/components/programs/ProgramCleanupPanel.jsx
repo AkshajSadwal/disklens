@@ -176,6 +176,7 @@ export default function ProgramCleanupPanel({ onClose, onReviewDelete, embedded 
                       <div className="dl-program-main">
                         <strong>{program.name}</strong>
                         <span>{program.publisher || "Unknown publisher"}{program.version ? ` · ${program.version}` : ""}</span>
+                        <small>{formatBytes(program.size || 0)} · {program.sizeBasis === "indexed-install-location-size" ? "indexed install files" : program.sizeBasis === "package-manager-or-registry-estimate" ? "OS/package size estimate" : "size unavailable"}</small>
                       </div>
                       <Icon name="chevronRight" size={13} />
                     </button>

@@ -2,6 +2,9 @@
   "name": "disklens-server",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "start": "node src/index.mjs",
     "dev": "node --watch src/index.mjs",
@@ -17,5 +20,9 @@
   "allowScripts": {
     "better-sqlite3@12.11.1": true
   },
-  "version": "1.0.0"
+  "version": "1.0.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/AkshajSadwal/disklens.git"
+  }
 }

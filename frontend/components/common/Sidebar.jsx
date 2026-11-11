@@ -6,7 +6,7 @@ const items = [
   { id: 'storage', label: 'Storage', icon: 'storage' },
   { id: 'programs', label: 'Programs & Cleanup', icon: 'programs' },
   { id: 'ai', label: 'AI Storage Advisor', icon: 'ai' },
-  { id: 'settings', label: 'Settings', icon: 'settings', disabled: true },
+  { id: 'settings', label: 'Settings', icon: 'settings' },
 ];
 
 export default function Sidebar({ active, onNavigate }) {
