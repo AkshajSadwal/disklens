@@ -57,6 +57,8 @@ export default function AiStoragePanel({ onClose, embedded = false }) {
   }, []);
 
   useEffect(() => {
+    setError("");
+    setTargetResults([]);
     if (targetType === "program") {
       const q = targetQuery.trim().toLowerCase();
       if (!q) {
@@ -89,6 +91,7 @@ export default function AiStoragePanel({ onClose, embedded = false }) {
     let cancelled = false;
     const timer = setTimeout(async () => {
       setTargetSearchLoading(true);
+      setTargetResults([]);
       try {
         const response = await fetch(`${API}/api/ai/storage/search?type=${encodeURIComponent(targetType)}&q=${encodeURIComponent(targetQuery.trim())}`);
         const data = await response.json().catch(() => null);
@@ -254,6 +257,7 @@ export default function AiStoragePanel({ onClose, embedded = false }) {
               </div>
               <input className="dl-ai-search" value={targetQuery} onChange={(e) => setTargetQuery(e.target.value)} placeholder={`Search ${targetType}s by name or path...`} />
               {targetSearchLoading && <div className="dl-ai-note">Searching indexed storage...</div>}
+              {!targetSearchLoading && targetQuery.trim() && targetResults.length === 0 && !error && <div className="dl-ai-search-state">No matching {targetType}s found.</div>}
               {targetResults.length > 0 && (
                 <div className="dl-ai-results">
                   {targetResults.map((item, index) => {

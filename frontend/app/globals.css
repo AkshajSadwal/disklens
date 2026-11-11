@@ -527,3 +527,50 @@ button { -webkit-tap-highlight-color: transparent; }
   height: 20px;
   margin: 0;
 }
+
+/* Restored DiskLens usability refinements */
+.dl-ai-head { padding: 20px 22px 16px; }
+.dl-ai-head h2 { font-size: 22px; letter-spacing: -.02em; }
+.dl-ai-head p { font-size: 12px; }
+.dl-ai-modes { gap: 10px; padding: 14px 18px; }
+.dl-ai-mode { min-height: 72px; padding: 12px; }
+.dl-ai-mode-index { width: 28px; height: 28px; font-size: 11px; }
+.dl-ai-mode strong { font-size: 12px; }
+.dl-ai-mode span { font-size: 10px; }
+.dl-ai-body { padding: 18px; }
+.dl-ai-config { padding: 15px; }
+.dl-ai-label { font-size: 10px; }
+.dl-ai-number { height: 36px; font-size: 12px; }
+.dl-ai-choice, .dl-ai-target-type { padding: 8px 12px; font-size: 10px; }
+.dl-ai-search { height: 40px; margin-top: 11px; padding: 0 12px; font-size: 12px; }
+.dl-ai-results { display: grid; gap: 6px; margin-top: 9px; max-height: min(340px, 42vh); overflow-y: auto; overscroll-behavior: contain; padding: 2px 5px 2px 1px; scrollbar-width: thin; }
+.dl-ai-result { padding: 10px 11px; }
+.dl-ai-result strong { font-size: 11px; line-height: 1.35; }
+.dl-ai-result span { font-size: 9px; line-height: 1.4; }
+.dl-ai-search-state { padding: 12px 10px; color: var(--dl-muted); font-size: 11px; }
+.dl-ai-selected { margin-top: 12px; padding-top: 12px; }
+.dl-ai-selected-title, .dl-ai-summary-kicker { font-size: 9px; }
+.dl-ai-selected-name { font-size: 13px; }
+.dl-ai-selected-path { font-size: 10px; line-height: 1.45; }
+.dl-ai-summary, .dl-ai-card { padding: 14px; border-radius: 11px; }
+.dl-ai-summary h3 { font-size: 15px; }
+.dl-ai-card-title { font-size: 12px; }
+.dl-ai-badge { font-size: 9px; padding: 5px 8px; }
+.dl-ai-card p { font-size: 11px; line-height: 1.55; }
+.dl-ai-card .action { font-size: 10px; line-height: 1.5; padding: 8px 9px; }
+.dl-ai-reference { padding: 8px 9px; }
+.dl-ai-reference strong { font-size: 10px; }
+.dl-ai-reference span { font-size: 9px; line-height: 1.4; }
+.dl-ai-config button:focus-visible, .dl-ai-search:focus-visible, .dl-ai-number:focus-visible { outline: 2px solid var(--dl-blue); outline-offset: 2px; }
+.dl-program-row { min-height: 68px; padding-top: 12px; padding-bottom: 12px; }
+.dl-program-main strong { font-size: 12px; line-height: 1.4; }
+.dl-program-main span { font-size: 10px; line-height: 1.5; }
+.legend-dot.free { background: #c7d0dc; }
+@media (max-width: 760px) {
+  .dl-ai-head { padding: 16px; }
+  .dl-ai-modes { grid-template-columns: 1fr; padding: 12px; }
+  .dl-ai-body { padding: 12px; }
+  .dl-ai-controls { align-items: stretch; }
+  .dl-ai-controls > .dl-primary-btn { width: 100%; min-height: 40px; }
+  .dl-ai-results { max-height: 42vh; }
+}
