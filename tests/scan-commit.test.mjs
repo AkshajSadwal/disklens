@@ -106,6 +106,14 @@ test("scan commit updates only changed rows and retains inaccessible descendants
   await invoke({ phase: "complete", root, scanId: "scan-five" });
   assert.ok(db.prepare("SELECT 1 FROM items WHERE path = ?").get(staleHiddenPath), "the denied directory retains its stale descendant");
 
+  // Simulate a clock tick tie and scan IDs that sort opposite to insertion
+  // order. The newest completed run must be selected by row insertion order,
+  // so a latest partial run invalidates the older full-snapshot fingerprint.
+  db.prepare("UPDATE scan_runs SET scan_id = 'z-previous-complete' WHERE scan_id = 'scan-four'").run();
+  db.prepare("UPDATE scan_runs SET scan_id = 'a-latest-partial' WHERE scan_id = 'scan-five'").run();
+  db.prepare("UPDATE scan_runs SET completed_at = ? WHERE scan_id IN ('z-previous-complete', 'a-latest-partial')")
+    .run("2026-01-01T00:00:00.000Z");
+
   await invoke({ phase: "start", root, scanId: "scan-six" });
   await invoke({ phase: "batch", root, scanId: "scan-six", items: [
     { path: paths.stable, name: "stable.txt", type: "file", size: 5 },

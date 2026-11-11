@@ -33,10 +33,14 @@ async function waitFor(predicate, { timeoutMs = 8000, intervalMs = 40 } = {}) {
   throw lastError || new Error("Timed out waiting for the scan to complete.");
 }
 
-test("live localhost API scans two small roots and reports a repeated snapshot", { timeout: 20000 }, async (t) => {
+test("live localhost API scans small and wide roots and reports a repeated snapshot", { timeout: 30000 }, async (t) => {
   const temporary = await fs.mkdtemp(path.join(os.tmpdir(), "disklens-scan-integration-"));
   const rootA = path.join(temporary, "scan one café");
   const rootB = path.join(temporary, "scan two");
+  // A broad frontier larger than the scanner's default in-memory directory
+  // queue forces both estimation and traversal through the disk-backed spill.
+  const wideRoot = path.join(temporary, "wide-tree");
+  const wideDirectoryCount = 1100;
   const dbPath = path.join(temporary, "integration.sqlite");
   const configPath = path.join(temporary, "config");
   await fs.mkdir(path.join(rootA, "sub folder"), { recursive: true });
@@ -45,6 +49,12 @@ test("live localhost API scans two small roots and reports a repeated snapshot",
   await fs.writeFile(path.join(rootA, "root-file.txt"), "fixture");
   await fs.writeFile(path.join(rootB, "one.txt"), "1");
   await fs.writeFile(path.join(rootB, "two.txt"), "22");
+  await fs.mkdir(wideRoot, { recursive: true });
+  for (let index = 0; index < wideDirectoryCount; index += 1) {
+    const directory = path.join(wideRoot, `directory-${String(index).padStart(4, "0")}`);
+    await fs.mkdir(directory);
+    await fs.writeFile(path.join(directory, "entry.txt"), "x");
+  }
   const port = await unusedLoopbackPort();
   const server = spawn(process.execPath, ["src/index.mjs"], {
     cwd: path.join(workspace, "server"),
@@ -90,7 +100,7 @@ test("live localhost API scans two small roots and reports a repeated snapshot",
 
   try {
     await waitFor(async () => (await getJson("/api/health")).ok);
-    const started = await postJson("/api/scans/run", { roots: [rootA, rootB], addNewRoot: true });
+    const started = await postJson("/api/scans/run", { roots: [rootA, rootB, wideRoot], addNewRoot: true });
     assert.equal(started.status, 202);
     const waitForRoot = (root) => waitFor(async () => {
       const { scan } = await getJson(`/api/scans/status?root=${encodeURIComponent(root)}`);
@@ -98,17 +108,32 @@ test("live localhost API scans two small roots and reports a repeated snapshot",
         throw new Error(`Scan ${scan.status} for ${root}: ${serverError}`);
       }
       return scan?.status === "completed" ? scan : null;
-    });
-    await Promise.all([waitForRoot(rootA), waitForRoot(rootB)]);
+    }, { timeoutMs: 20000 });
+    await Promise.all([waitForRoot(rootA), waitForRoot(rootB), waitForRoot(wideRoot)]);
 
     const historyA = await getJson(`/api/scans/history?root=${encodeURIComponent(rootA)}`);
     const historyB = await getJson(`/api/scans/history?root=${encodeURIComponent(rootB)}`);
+    const historyWide = await getJson(`/api/scans/history?root=${encodeURIComponent(wideRoot)}`);
     assert.equal(historyA.runs[0].itemCount, 3);
     assert.equal(historyB.runs[0].itemCount, 2);
     assert.equal(historyA.runs[0].fingerprintMatchesPrevious, null);
     assert.equal(historyB.runs[0].fingerprintMatchesPrevious, null);
+    assert.equal(historyWide.runs[0].itemCount, wideDirectoryCount * 2,
+      "the disk-backed queue must visit every directory and file beyond the in-memory frontier");
+    assert.equal(historyWide.runs[0].indexedBytes, wideDirectoryCount,
+      "the broad-tree scan must preserve each one-byte file");
 
-    const repeat = await postJson("/api/scans/run", { root: rootA });
+    // A multi-root collector can have committed the last root a moment before
+    // its parent process emits the final exit event. Retry only this expected
+    // short-lived overlap response rather than making the test timing-sensitive.
+    const repeat = await waitFor(async () => {
+      try {
+        return await postJson("/api/scans/run", { root: rootA });
+      } catch (error) {
+        if (/overlaps an already active scan location/i.test(error.message)) return null;
+        throw error;
+      }
+    }, { timeoutMs: 5000, intervalMs: 25 });
     assert.equal(repeat.status, 202);
     await waitForRoot(rootA);
     const repeatedHistory = await getJson(`/api/scans/history?root=${encodeURIComponent(rootA)}`);

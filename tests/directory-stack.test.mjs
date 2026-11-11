@@ -30,3 +30,25 @@ test("directory work stack bounds memory, spills paths in stack order, and remov
   await stack.close();
   await assert.rejects(fs.stat(spoolDirectory), { code: "ENOENT" });
 });
+
+test("directory work stack keeps a 5,000-entry frontier within its memory bound", async (t) => {
+  const parent = await fs.mkdtemp(path.join(os.tmpdir(), "disklens-directory-stack-wide-"));
+  const stack = new DirectoryStack({ maxInMemory: 64, tempDirectory: parent });
+  t.after(async () => {
+    await stack.close();
+    await fs.rm(parent, { recursive: true, force: true });
+  });
+
+  const count = 5000;
+  for (let index = 0; index < count; index += 1) {
+    await stack.push(`directory-${String(index).padStart(5, "0")}`);
+    assert.ok(stack.memory.length <= 64, "the in-memory frontier must remain bounded");
+  }
+  assert.ok(stack.spoolDirectory, "a wide frontier should spill to a private temporary spool");
+
+  for (let index = count - 1; index >= 0; index -= 1) {
+    assert.equal(await stack.pop(), `directory-${String(index).padStart(5, "0")}`);
+    assert.ok(stack.memory.length <= 64, "popping must not grow the in-memory frontier");
+  }
+  assert.equal(await stack.pop(), undefined);
+});

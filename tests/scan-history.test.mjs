@@ -41,3 +41,23 @@ test("scan history is paginated, newest first, and filterable by root", async (t
     preserved: filtered.body.runs[1].preservedCount }, { added: 2, changed: 3, unchanged: 7, removed: 1, preserved: 0 });
   assert.equal((await invoke({ limit: "all" })).statusCode, 400);
 });
+
+
+test("scan history uses insertion order to break equal start-time ties", async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "disklens-scan-history-order-"));
+  const db = createDatabase(path.join(directory, "fixture.db"));
+  const timestamp = "2026-11-11T00:00:00.000Z";
+  const insert = db.prepare("INSERT INTO scan_runs (scan_id, root, status, started_at, completed_at) VALUES (?, ?, 'completed', ?, ?)");
+  insert.run("z-older", "/fixture/a", timestamp, timestamp);
+  insert.run("a-newer", "/fixture/a", timestamp, timestamp);
+  const handlers = new Map();
+  registerScanRoutes({ get: (route, handler) => handlers.set(route, handler), post: () => {}, addHook: () => {}, log: { info() {}, warn() {}, error() {} } }, db);
+  t.after(async () => { db.close(); await fs.rm(directory, { recursive: true, force: true }); });
+
+  const reply = { statusCode: 200, code(value) { this.statusCode = value; return this; }, send(value) { this.payload = value; return value; } };
+  const result = await handlers.get("/api/scans/history")({ query: { root: "/fixture/a", limit: "5" } }, reply);
+  const body = reply.payload || result;
+  assert.equal(reply.statusCode, 200);
+  assert.deepEqual(body.runs.map((run) => run.scanId), ["a-newer", "z-older"],
+    "the later inserted run must stay first even when its identifier sorts earlier");
+});

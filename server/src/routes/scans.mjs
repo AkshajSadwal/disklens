@@ -233,8 +233,8 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
     if (rawLimit !== undefined && !/^\d+$/.test(String(rawLimit))) return reply.code(400).send({ error: "limit must be a positive integer." });
     const limit = Math.min(100, Math.max(1, Number.parseInt(rawLimit, 10) || 20));
     const rows = root
-      ? db.prepare(`SELECT * FROM scan_runs WHERE root = ? ORDER BY started_at DESC, scan_id DESC LIMIT ?`).all(root, limit)
-      : db.prepare(`SELECT * FROM scan_runs ORDER BY started_at DESC, scan_id DESC LIMIT ?`).all(limit);
+      ? db.prepare(`SELECT * FROM scan_runs WHERE root = ? ORDER BY started_at DESC, rowid DESC LIMIT ?`).all(root, limit)
+      : db.prepare(`SELECT * FROM scan_runs ORDER BY started_at DESC, rowid DESC LIMIT ?`).all(limit);
     return {
       runs: rows.map((row) => ({
         scanId: row.scan_id, root: row.root, status: row.status,
@@ -259,8 +259,8 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
     const root = typeof request.query?.root === "string" ? request.query.root : "";
     if (root.length > maxTextLength) return reply.code(400).send({ error: "Invalid root." });
     const row = root
-      ? db.prepare(`SELECT * FROM scan_runs WHERE root = ? ORDER BY started_at DESC LIMIT 1`).get(root)
-      : db.prepare(`SELECT * FROM scan_runs ORDER BY started_at DESC LIMIT 1`).get();
+      ? db.prepare(`SELECT * FROM scan_runs WHERE root = ? ORDER BY started_at DESC, rowid DESC LIMIT 1`).get(root)
+      : db.prepare(`SELECT * FROM scan_runs ORDER BY started_at DESC, rowid DESC LIMIT 1`).get();
     const job = root ? activeScans.get(pathKey(root)) : null;
     const recentOutcome = root ? recentScanOutcomes.get(pathKey(root)) : null;
     if (recentOutcome && (!row || !row.started_at || row.started_at < recentOutcome.startedAt)) {
@@ -455,7 +455,7 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
         const previousFingerprint = db.prepare(`
           SELECT root_fingerprint FROM scan_runs
           WHERE root = ? AND status = 'completed'
-          ORDER BY completed_at DESC, scan_id DESC LIMIT 1
+          ORDER BY rowid DESC LIMIT 1
         `).get(root)?.root_fingerprint || null;
         const fingerprintMatchesPrevious = rootFingerprint == null || previousFingerprint == null
           ? null
