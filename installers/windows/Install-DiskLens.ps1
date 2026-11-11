@@ -15,16 +15,28 @@ foreach ($relative in @(".env.example", "server\.env.example", "frontend\.env.ex
     Copy-Item -Force $from $to
   }
 }
-$Launcher = Join-Path $Destination "scripts\windows\launch.ps1"
+$InstallerDir = Join-Path $Destination "installers\windows"
+$Icon = Join-Path $Destination "assets\disklens.ico"
+$StartVbs = Join-Path $InstallerDir "Start-DiskLens.vbs"
+$StopVbs = Join-Path $InstallerDir "Stop-DiskLens.vbs"
 $ShortcutDir = Join-Path ([Environment]::GetFolderPath("Programs")) "DiskLens"
 New-Item -ItemType Directory -Force -Path $ShortcutDir | Out-Null
-$ShortcutPath = Join-Path $ShortcutDir "DiskLens.lnk"
 $Shell = New-Object -ComObject WScript.Shell
-$Shortcut = $Shell.CreateShortcut($ShortcutPath)
-$Shortcut.TargetPath = (Get-Command powershell.exe).Source
-$Shortcut.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$Launcher`""
-$Shortcut.WorkingDirectory = $Destination
-$Shortcut.Description = "Start local DiskLens storage analyzer"
-$Shortcut.Save()
-Write-Host "DiskLens installed for the current Windows user. Start it from the Start Menu > DiskLens."
-Write-Host "No administrator privileges were requested."
+
+function New-DiskLensShortcut([string]$Path, [string]$Target, [string]$Arguments, [string]$Description, [string]$IconPath) {
+  $shortcut = $Shell.CreateShortcut($Path)
+  $shortcut.TargetPath = $Target
+  $shortcut.Arguments = $Arguments
+  $shortcut.WorkingDirectory = $Destination
+  $shortcut.Description = $Description
+  if (Test-Path -LiteralPath $IconPath) { $shortcut.IconLocation = "$IconPath,0" }
+  $shortcut.Save()
+}
+
+$WScript = Join-Path $env:WINDIR "System32\wscript.exe"
+New-DiskLensShortcut (Join-Path $ShortcutDir "DiskLens.lnk") $WScript "`"$StartVbs`"" "Start DiskLens in your browser" $Icon
+New-DiskLensShortcut (Join-Path $ShortcutDir "Stop DiskLens.lnk") $WScript "`"$StopVbs`"" "Stop the local DiskLens services" $Icon
+$Desktop = [Environment]::GetFolderPath("Desktop")
+New-DiskLensShortcut (Join-Path $Desktop "DiskLens.lnk") $WScript "`"$StartVbs`"" "Start DiskLens in your browser" $Icon
+Write-Host "DiskLens installed for the current Windows user. Use the Desktop icon or Start Menu > DiskLens."
+Write-Host "A Stop DiskLens shortcut is available in the Start Menu. No administrator privileges were requested."

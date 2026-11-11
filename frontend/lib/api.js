@@ -1,1 +1,3 @@
-export const API = process.env.NEXT_PUBLIC_DISKLENS_API ?? "http://127.0.0.1:4000";
+// API requests use the same origin as the UI. The Next.js local proxy forwards
+// them to the private Fastify port chosen by the launcher at runtime.
+export const API = "";

@@ -1,4 +1,38 @@
 $ErrorActionPreference = "Stop"
+$Root = (Resolve-Path (Join-Path $PSScriptRoot "../..")).Path
+$BundledNode = Join-Path $Root "runtime\node.exe"
+$DataDirectory = Join-Path $env:LOCALAPPDATA "DiskLens"
+$LogDirectory = Join-Path $DataDirectory "logs"
+$LogPath = Join-Path $LogDirectory "launcher.log"
+New-Item -ItemType Directory -Force -Path $LogDirectory | Out-Null
+if ((Test-Path $LogPath) -and (Get-Item $LogPath).Length -gt 2MB) {
+  Move-Item -Force $LogPath (Join-Path $LogDirectory "launcher.previous.log")
+}
+
+function Invoke-DiskLens([string]$NodeCommand, [string]$LauncherScript) {
+  Set-Location $Root
+  & $NodeCommand $LauncherScript *>> $LogPath
+  $exitCode = $LASTEXITCODE
+  if ($exitCode -ne 0) {
+    Add-Type -AssemblyName System.Windows.Forms
+    [System.Windows.Forms.MessageBox]::Show(
+      "DiskLens could not start (exit $exitCode). See the startup log at:`n$LogPath",
+      "DiskLens startup error",
+      [System.Windows.Forms.MessageBoxButtons]::OK,
+      [System.Windows.Forms.MessageBoxIcon]::Error
+    ) | Out-Null
+    exit $exitCode
+  }
+}
+
+if (Test-Path -LiteralPath $BundledNode) {
+  # Release installs always use the bundled runtime because native modules
+  # (notably better-sqlite3) were installed for this exact Node ABI.
+  $env:PATH = "$(Split-Path -Parent $BundledNode);$env:PATH"
+  $env:DISKLENS_PRODUCTION = "1"
+  Invoke-DiskLens $BundledNode (Join-Path $Root "scripts\launch.mjs")
+  exit 0
+}
 
 function Ensure-NodeRuntime {
   $nodeCommand = Get-Command node -ErrorAction SilentlyContinue
@@ -41,7 +75,4 @@ function Ensure-NodeRuntime {
 }
 
 Ensure-NodeRuntime
-$Root = (Resolve-Path (Join-Path $PSScriptRoot "../..")).Path
-Set-Location $Root
-& node scripts/launch.mjs
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+Invoke-DiskLens "node" (Join-Path $Root "scripts\launch.mjs")

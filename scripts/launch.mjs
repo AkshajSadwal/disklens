@@ -6,7 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
 import { getUserDataDirectory, prepareUserDataDirectory, runFirstRun } from "./first-run.mjs";
-import { buildFrontendDevArgs } from "./frontendCommand.mjs";
+import { buildFrontendDevArgs, buildFrontendStartArgs } from "./frontendCommand.mjs";
 import { requireSupportedNodeRuntime } from "../shared/nodeRuntime.mjs";
 
 try {
@@ -24,13 +24,14 @@ const dataDirectory = getUserDataDirectory();
 const dbPath = path.join(dataDirectory, "disklens.db");
 const lockPath = path.join(dataDirectory, "launcher.lock");
 let lockHandle = null;
+const launcherStartedAt = new Date().toISOString();
 
 async function acquireLauncherLock() {
   await mkdir(dataDirectory, { recursive: true });
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
       lockHandle = await open(lockPath, "wx");
-      await lockHandle.writeFile(JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString() }));
+      await lockHandle.writeFile(JSON.stringify({ pid: process.pid, startedAt: launcherStartedAt }));
       await lockHandle.sync();
       return;
     } catch (error) {
@@ -43,11 +44,26 @@ async function acquireLauncherLock() {
         try { process.kill(pid, 0); alive = true; }
         catch (probeError) { alive = probeError.code === "EPERM"; }
       }
-      if (alive) throw new Error(`DiskLens is already running (PID ${pid}). Close the existing window before starting another instance.`);
+      if (alive) {
+        if (typeof existing?.url === "string" && existing.url.startsWith("http://127.0.0.1:")) {
+          console.log("DiskLens is already running. Opening the existing browser session.");
+          openBrowser(existing.url);
+          process.exit(0);
+        }
+        throw new Error(`DiskLens is already starting (PID ${pid}). Try the shortcut again in a moment.`);
+      }
       await rm(lockPath, { force: true });
     }
   }
   throw new Error("Could not acquire the DiskLens application lock.");
+}
+
+async function updateLauncherLock(fields) {
+  if (!lockHandle) return;
+  const contents = JSON.stringify({ pid: process.pid, startedAt: launcherStartedAt, ...fields });
+  await lockHandle.truncate(0);
+  await lockHandle.write(contents, 0, "utf8");
+  await lockHandle.sync();
 }
 
 async function releaseLauncherLock() {
@@ -233,12 +249,21 @@ try {
 
   const nextBin = path.join(frontendDir, "node_modules", "next", "dist", "bin", "next");
   if (!existsSync(nextBin)) throw new Error("Next.js executable is missing. Re-run the launcher to install frontend dependencies.");
-  spawnManaged(process.execPath, buildFrontendDevArgs(nextBin, webPort), frontendDir, {
+  const productionMode = process.env.DISKLENS_PRODUCTION === "1";
+  if (productionMode && !existsSync(path.join(frontendDir, ".next", "BUILD_ID"))) {
+    throw new Error("The packaged frontend has not been built. Reinstall DiskLens using the official installer.");
+  }
+  spawnManaged(process.execPath, productionMode
+    ? buildFrontendStartArgs(nextBin, webPort)
+    : buildFrontendDevArgs(nextBin, webPort), frontendDir, {
     ...process.env,
+    NODE_ENV: productionMode ? "production" : (process.env.NODE_ENV || "development"),
     PORT: String(webPort),
-    NEXT_PUBLIC_DISKLENS_API: apiUrl,
+    DISKLENS_API_ORIGIN: apiUrl,
+    NEXT_TELEMETRY_DISABLED: "1",
   });
   await waitFor(webUrl, 90000);
+  await updateLauncherLock({ url: webUrl });
   console.log(`\nDiskLens ready at ${webUrl}`);
   console.log("Keep this terminal open. Press Ctrl+C to stop DiskLens.");
   openBrowser(webUrl);

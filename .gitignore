@@ -53,3 +53,6 @@ server/.env
 
 MIGRATE_FROM_CURRENT.md
 TEST_REPORT.md
+# Native installer outputs / local release staging
+installers/windows/Output/
+release/
