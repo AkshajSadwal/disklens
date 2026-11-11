@@ -29,6 +29,11 @@ export function createDatabase(filename = process.env.DISKLENS_DB_PATH || "diskl
     CREATE INDEX IF NOT EXISTS idx_items_root ON items(root);
     CREATE INDEX IF NOT EXISTS idx_items_path ON items(path);
     CREATE INDEX IF NOT EXISTS idx_items_size ON items(type, size DESC);
+    -- Program size aggregation uses case-insensitive path-prefix lookups.
+    -- A composite index keeps each installed-program lookup bounded instead
+    -- of repeatedly scanning the entire file index.
+    CREATE INDEX IF NOT EXISTS idx_items_type_path_nocase
+      ON items(type, path COLLATE NOCASE);
 
     CREATE TABLE IF NOT EXISTS drives (
       root TEXT PRIMARY KEY,

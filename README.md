@@ -118,3 +118,15 @@ The root `.env.example` and `server/.env.example` contain empty optional AI key 
 
 - `TEST_REPORT.md` — automated checks, build/install limitations, and native-platform verification still required.
 - `MIGRATE_FROM_CURRENT.md` — safe upgrade steps for an existing working copy.
+
+
+## Check which database DiskLens is using
+
+From the `server` directory, set `DISKLENS_DB_PATH` to the database you want to inspect and run:
+
+```powershell
+$env:DISKLENS_DB_PATH = "A:\\disklens-starter\\server\\disklens.db"
+npm run diagnose
+```
+
+The diagnostic is read-only. It reports the database file size, indexed item counts, indexed roots, drive metadata, and recent scan runs. It does not migrate, modify, or rescan the database.

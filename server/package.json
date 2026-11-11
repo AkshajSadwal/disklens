@@ -6,7 +6,8 @@
     "start": "node src/index.mjs",
     "dev": "node --watch src/index.mjs",
     "migrate": "node scripts/migrate.mjs",
-    "test": "node --test ../tests/*.test.mjs"
+    "test": "node --test ../tests/*.test.mjs",
+    "diagnose": "node scripts/diagnose-db.mjs"
   },
   "dependencies": {
     "@fastify/cors": "^11.0.1",

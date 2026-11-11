@@ -63,7 +63,13 @@ async function readLiveWindowsDrives() {
   const { stdout } = await execFileAsync(
     "powershell.exe",
     ["-NoProfile", "-NonInteractive", "-Command", script],
-    { windowsHide: true, maxBuffer: 2 * 1024 * 1024 },
+    {
+      windowsHide: true,
+      maxBuffer: 2 * 1024 * 1024,
+      // WMI/CIM can hang on slow or unhealthy Windows installations. The
+      // dashboard must still be able to load using its stored drive metadata.
+      timeout: 5000,
+    },
   );
 
   if (!stdout.trim()) return [];

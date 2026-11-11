@@ -1,8 +1,19 @@
+function normalizeRootKey(root) {
+  const original = String(root || "").trim();
+  if (original === "/" || original === "\\") return original;
+  let value = original.replace(/[\\/]+$/, "");
+  // Treat a bare Windows drive designator (C:) and its absolute root (C:\\)
+  // as the same indexed location. Keep non-drive paths case-insensitive too.
+  if (/^[a-zA-Z]:$/.test(value)) value += "\\";
+  return value.toLocaleUpperCase("en-US");
+}
+
 export function registerRootRoutes(app, db) {
   app.get("/api/roots", async () => {
-    // Include completed empty scans and explicitly registered drive roots too.
-    // Otherwise an empty folder disappears from Home and cannot be rescanned.
-    return db.prepare(`
+    // Include completed empty scans and registered drive roots, then merge
+    // aliases such as "C:" and "C:\\". Prefer the spelling associated with
+    // actual indexed items so navigation uses the same root value as items.
+    const rows = db.prepare(`
       WITH known_roots AS (
         SELECT root FROM items WHERE root IS NOT NULL AND root != ''
         UNION
@@ -21,5 +32,31 @@ export function registerRootRoutes(app, db) {
       GROUP BY roots.root
       ORDER BY roots.root
     `).all();
+
+    const merged = new Map();
+    for (const row of rows) {
+      const key = normalizeRootKey(row.root);
+      if (!key) continue;
+      const current = merged.get(key);
+      if (!current) {
+        merged.set(key, { ...row, _representativeCount: Number(row.itemCount) || 0 });
+        continue;
+      }
+
+      current.size += Number(row.size) || 0;
+      current.itemCount += Number(row.itemCount) || 0;
+      current.fileCount += Number(row.fileCount) || 0;
+      current.folderCount += Number(row.folderCount) || 0;
+      // A populated root is canonical for navigation; empty drive metadata
+      // rows should never replace the path used by the indexed items.
+      if ((Number(row.itemCount) || 0) > current._representativeCount) {
+        current.root = row.root;
+        current._representativeCount = Number(row.itemCount) || 0;
+      }
+    }
+
+    return [...merged.values()]
+      .map(({ _representativeCount, ...row }) => row)
+      .sort((a, b) => String(a.root).localeCompare(String(b.root)));
   });
 }

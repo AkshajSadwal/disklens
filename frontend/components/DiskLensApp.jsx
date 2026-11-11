@@ -42,22 +42,31 @@ export default function DiskLensApp() {
 
   useEffect(() => {
     async function loadOverview() {
+      // The drive-capacity endpoint may wait on Windows CIM/WMI. Do not make
+      // indexed roots and largest items wait for that independent lookup.
+      fetch(`${API}/api/drives`)
+        .then(async (response) => {
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          return response.json();
+        })
+        .then((data) => setDrives(Array.isArray(data) ? data : []))
+        .catch(() => setDrives([]));
+
       try {
-        const [rootsResponse, drivesResponse, largestResponse] = await Promise.all([
+        const [rootsResponse, largestResponse] = await Promise.all([
           fetch(`${API}/api/roots`),
-          fetch(`${API}/api/drives`).catch(() => null),
           fetch(`${API}/api/items?page=1&limit=7&sort=size&order=desc`).catch(() => null),
         ]);
 
         if (!rootsResponse.ok) throw new Error(`HTTP ${rootsResponse.status}`);
         const rootData = await rootsResponse.json();
-        setRoots(rootData);
-        if (rootData.length > 0 && !currentPath) setCurrentPath(rootData[0].root);
+        const safeRoots = Array.isArray(rootData) ? rootData : [];
+        setRoots(safeRoots);
+        if (safeRoots.length > 0 && !currentPath) setCurrentPath(safeRoots[0].root);
 
-        if (drivesResponse?.ok) setDrives(await drivesResponse.json());
         if (largestResponse?.ok) {
           const data = await largestResponse.json();
-          setLargestItems(data.items || []);
+          setLargestItems(Array.isArray(data?.items) ? data.items : []);
         }
       } catch (err) {
         setError(err.message);

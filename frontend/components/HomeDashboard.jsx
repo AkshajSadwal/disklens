@@ -161,23 +161,28 @@ export default function HomeDashboard({
     };
   }, [roots]);
   useEffect(() => {
-    let cancelled = false;
+    // Installed-program discovery is relatively expensive on Windows. Keep
+    // the Home overview responsive and fetch this list only when its tab is
+    // actually opened.
+    if (largestFilter !== "programs") return undefined;
+
+    const controller = new AbortController();
     async function loadPrograms() {
       setProgramsLoading(true);
       try {
-        const response = await fetch(`${API}/api/programs`);
+        const response = await fetch(`${API}/api/programs`, { signal: controller.signal });
         const data = await response.json().catch(() => null);
         if (!response.ok) throw new Error(data?.error || `HTTP ${response.status}`);
-        if (!cancelled) setPrograms(Array.isArray(data?.programs) ? data.programs : []);
-      } catch {
-        if (!cancelled) setPrograms([]);
+        setPrograms(Array.isArray(data?.programs) ? data.programs : []);
+      } catch (error) {
+        if (error.name !== "AbortError") setPrograms([]);
       } finally {
-        if (!cancelled) setProgramsLoading(false);
+        if (!controller.signal.aborted) setProgramsLoading(false);
       }
     }
     loadPrograms();
-    return () => { cancelled = true; };
-  }, [roots]);
+    return () => controller.abort();
+  }, [roots, largestFilter]);
 
   const normalizeRoot = (root) =>
     String(root || "")

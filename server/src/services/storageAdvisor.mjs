@@ -133,11 +133,14 @@ export async function buildProgramStorageRows(db, discoveredPrograms = null) {
 
   const indexedSizeStatement = db.prepare(`
     SELECT
-      COALESCE(SUM(CASE WHEN type = 'file' THEN size ELSE 0 END), 0) AS totalSize,
-      COUNT(CASE WHEN type = 'file' THEN 1 END) AS fileCount
+      COALESCE(SUM(size), 0) AS totalSize,
+      COUNT(*) AS fileCount
     FROM items
     WHERE type = 'file'
-      AND (path = ? OR substr(path, 1, length(?)) = ?)
+      AND (
+        path = ? COLLATE NOCASE
+        OR path LIKE ? ESCAPE '\\' COLLATE NOCASE
+      )
   `);
 
   return programs.map((program) => {
@@ -149,7 +152,11 @@ export async function buildProgramStorageRows(db, discoveredPrograms = null) {
     let sizeBasis = program.estimatedSizeKB ? "package-manager-or-registry-estimate" : "not-available";
 
     if (installLocation && prefix) {
-      const row = indexedSizeStatement.get(installLocation, prefix, prefix);
+      // Escape SQL LIKE metacharacters so paths containing %, _ or \\
+      // are treated as literal path characters. The trailing wildcard still
+      // allows SQLite to use idx_items_type_path_nocase as a prefix range.
+      const escapedPrefix = prefix.replace(/[\\%_]/g, (character) => `\\${character}`);
+      const row = indexedSizeStatement.get(installLocation, `${escapedPrefix}%`);
       const indexedSize = Number(row?.totalSize) || 0;
 
       if (indexedSize > 0) {
