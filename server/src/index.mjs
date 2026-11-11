@@ -1,17 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
 import Fastify from "fastify";
-
-// Lightweight .env loader: local values are optional and never override shell env.
-const envFile = path.resolve(process.cwd(), ".env");
-if (fs.existsSync(envFile)) {
-  for (const line of fs.readFileSync(envFile, "utf8").split(/\\r?\\n/)) {
-    const match = line.match(/^\\s*([A-Za-z_][A-Za-z0-9_]*)\\s*=\\s*(.*)\\s*$/);
-    if (!match || match[1] in process.env) continue;
-    const value = match[2].replace(/^(['"])(.*)\\1$/, "$2");
-    process.env[match[1]] = value;
-  }
-}
 import cors from "@fastify/cors";
 
 import { createDatabase } from "./db/database.mjs";
@@ -27,18 +16,44 @@ import { registerProgramRoutes } from "./routes/programs.mjs";
 import { registerAIRoutes } from "./routes/ai.mjs";
 import { registerDriveRoutes } from "./routes/drives.mjs";
 
-const app = Fastify({ logger: true });
+function loadLocalEnv() {
+  const envFile = path.resolve(process.cwd(), ".env");
+  if (!fs.existsSync(envFile)) return;
+  for (const rawLine of fs.readFileSync(envFile, "utf8").split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith("#")) continue;
+    const match = line.match(/^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/);
+    if (!match || Object.hasOwn(process.env, match[1])) continue;
+    let value = match[2].trim();
+    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+      value = value.slice(1, -1);
+    } else {
+      value = value.replace(/\s+#.*$/, "").trim();
+    }
+    process.env[match[1]] = value;
+  }
+}
+
+loadLocalEnv();
+
+const portValue = Number(process.env.DISKLENS_PORT || 4000);
+const port = Number.isInteger(portValue) && portValue > 0 && portValue <= 65535 ? portValue : 4000;
+const dbPath = process.env.DISKLENS_DB_PATH || "disklens.db";
+const app = Fastify({
+  logger: { level: process.env.DISKLENS_LOG_LEVEL || "info" },
+  bodyLimit: 5 * 1024 * 1024,
+  requestTimeout: 30_000,
+});
 
 await app.register(cors, {
   origin(origin, callback) {
-    // The app stays loopback-only, while allowing its dynamically selected UI port.
-    const allowed = !origin || /^http:\/\/(localhost|127\.0\.0\.1):\d+$/.test(origin);
+    // DiskLens binds to loopback. Allow browser UIs served from loopback only.
+    const allowed = !origin || /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
     callback(null, allowed);
   },
 });
 
-const db = createDatabase("disklens.db");
-
+const db = createDatabase(dbPath);
 registerHealthRoutes(app);
 registerScanRoutes(app, db);
 registerItemRoutes(app, db);
@@ -51,4 +66,22 @@ registerDeleteRoutes(app, db);
 registerProgramRoutes(app, db);
 registerAIRoutes(app, db);
 
-app.listen({ host: "127.0.0.1", port: 4000 });
+app.addHook("onClose", async () => {
+  try { db.close(); } catch {}
+});
+
+try {
+  await app.listen({ host: "127.0.0.1", port });
+  app.log.info(`DiskLens API listening on http://127.0.0.1:${port}`);
+} catch (error) {
+  app.log.error(error, "Could not start DiskLens API");
+  process.exitCode = 1;
+  try { db.close(); } catch {}
+}
+
+async function closeServer(signal) {
+  app.log.info({ signal }, "Shutting down DiskLens API");
+  try { await app.close(); } catch (error) { app.log.error(error); }
+}
+process.once("SIGINT", () => closeServer("SIGINT").finally(() => process.exit(130)));
+process.once("SIGTERM", () => closeServer("SIGTERM").finally(() => process.exit(0)));

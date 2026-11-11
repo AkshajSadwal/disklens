@@ -31,6 +31,13 @@ function tokensFor(value) {
   )];
 }
 
+export function getProgramCandidateSearchTerms(programInput) {
+  return [...new Set([
+    ...tokensFor(programInput?.name),
+    ...tokensFor(programInput?.publisher),
+  ])];
+}
+
 function cleanPath(value) {
   return String(value ?? "")
     .trim()
@@ -84,7 +91,9 @@ function isProtectedSystemPath(itemPath) {
   return (
     /:\\windows(?:\\|$)/i.test(lower) ||
     /\\program files(?: \(x86\))?\\common files(?:\\|$)/i.test(lower) ||
-    /:\\programdata\\microsoft(?:\\|$)/i.test(lower)
+    /:\\programdata\\microsoft(?:\\|$)/i.test(lower) ||
+    /^(?:\\)?(?:usr|etc|bin|sbin|lib|lib64|boot|dev|proc|root|run|sys|var)(?:\\|$)/i.test(lower.replace(/^([a-z]:)/i, "").replace(/^\\/, "")) ||
+    /^(?:\\)(?:system|library)(?:\\|$)/i.test(lower)
   );
 }
 

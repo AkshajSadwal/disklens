@@ -1,3 +1,4 @@
+import path from "node:path";
 export function registerItemRoutes(app, db) {
   app.get("/api/items", async (request) => {
     const page = Math.max(Number(request.query?.page) || 1, 1);
@@ -95,9 +96,13 @@ export function registerItemRoutes(app, db) {
             COUNT(CASE WHEN type = 'file' THEN 1 END) AS fileCount,
             COUNT(CASE WHEN type = 'directory' THEN 1 END) - 1 AS folderCount
           FROM items
-          WHERE path = ? OR path LIKE ?
+          WHERE path = ? OR substr(path, 1, length(?)) = ?
         `)
-        .get(item.path, `${item.path}\\%`);
+        .get(
+          item.path,
+          item.path.endsWith(path.sep) ? item.path : `${item.path}${path.sep}`,
+          item.path.endsWith(path.sep) ? item.path : `${item.path}${path.sep}`,
+        );
 
       return {
         ...item,

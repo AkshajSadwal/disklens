@@ -1,3 +1,4 @@
+import path from "node:path";
 import { deleteItem } from "../services/deleteService.mjs";
 
 export function registerDeleteRoutes(app, db) {
@@ -61,7 +62,8 @@ export function registerDeleteRoutes(app, db) {
         await deleteItem(item.path, item.type, mode);
 
         if (item.type === "directory") {
-          db.prepare("DELETE FROM items WHERE path = ? OR path LIKE ?").run(item.path, `${item.path}\\%`);
+          const prefix = item.path.endsWith(path.sep) ? item.path : `${item.path}${path.sep}`;
+          db.prepare("DELETE FROM items WHERE path = ? OR substr(path, 1, length(?)) = ?").run(item.path, prefix, prefix);
         } else {
           db.prepare("DELETE FROM items WHERE id = ?").run(item.id);
         }

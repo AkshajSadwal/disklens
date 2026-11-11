@@ -1,19 +1,20 @@
+import path from "node:path";
 import { discoverInstalledPrograms } from "./programDiscovery.mjs";
 
 const MAX_LIMIT = 50;
 const DEFAULT_LIMIT = 10;
 
 function cleanPath(value) {
-  return String(value ?? "")
-    .trim()
-    .replace(/^"|"$/g, "")
-    .replace(/[\\/]+$/, "");
+  const raw = String(value ?? "").trim().replace(/^"|"$/g, "");
+  if (!raw) return "";
+  const resolved = path.resolve(raw);
+  return resolved === path.parse(resolved).root ? resolved : resolved.replace(/[\\/]+$/, "");
 }
-
 
 function pathPrefix(value) {
   const cleaned = cleanPath(value);
-  return cleaned ? `${cleaned}\\%` : "";
+  if (!cleaned) return "";
+  return cleaned.endsWith(path.sep) ? cleaned : `${cleaned}${path.sep}`;
 }
 
 function clampLimit(value) {
@@ -23,7 +24,7 @@ function clampLimit(value) {
 }
 
 function folderDepth(pathValue) {
-  return (String(pathValue ?? "").match(/\\/g) || []).length;
+  return (String(pathValue ?? "").match(/[\\/]/g) || []).length;
 }
 
 function serializeFile(row) {
@@ -49,8 +50,8 @@ function getFolderAggregate(db, folderPath) {
       COUNT(CASE WHEN type = 'file' THEN 1 END) AS fileCount,
       COUNT(CASE WHEN type = 'directory' THEN 1 END) - 1 AS folderCount
     FROM items
-    WHERE path = ? OR path LIKE ?
-  `).get(folderPath, prefix);
+    WHERE path = ? OR substr(path, 1, length(?)) = ?
+  `).get(cleanPath(folderPath), prefix, prefix);
 
   return {
     totalSize: Number(row?.totalSize) || 0,
@@ -88,20 +89,20 @@ function getTopLevelFolders(db, limit) {
     const rootClean = cleanPath(root);
     if (!rootClean) continue;
 
-    const rootDepth = folderDepth(root);
+    const rootDepth = folderDepth(rootClean);
+    const isVolumeRoot = path.parse(rootClean).root === rootClean;
+    const targetDepth = rootDepth + (isVolumeRoot ? 0 : 1);
 
     const candidates = db.prepare(`
       SELECT id, root, path, name, created_at AS createdAt, modified_at AS modifiedAt
       FROM items
-      WHERE type = 'directory'
-        AND root = ?
-        AND (length(path) - length(replace(path, '\\', ''))) = ?
+      WHERE type = 'directory' AND root = ?
       ORDER BY path
-    `).all(root, rootDepth);
+    `).all(root);
 
     for (const row of candidates) {
       const depth = folderDepth(row.path);
-      if (depth !== rootDepth) continue;
+      if (depth !== targetDepth) continue;
 
       const aggregate = getFolderAggregate(db, row.path);
       if (!aggregate || aggregate.totalSize <= 0) continue;
@@ -127,8 +128,8 @@ function getTopLevelFolders(db, limit) {
   return folders.slice(0, limit);
 }
 
-async function buildProgramStorageRows(db) {
-  const programs = await discoverInstalledPrograms();
+export async function buildProgramStorageRows(db, discoveredPrograms = null) {
+  const programs = discoveredPrograms || await discoverInstalledPrograms();
 
   const indexedSizeStatement = db.prepare(`
     SELECT
@@ -136,19 +137,19 @@ async function buildProgramStorageRows(db) {
       COUNT(CASE WHEN type = 'file' THEN 1 END) AS fileCount
     FROM items
     WHERE type = 'file'
-      AND (path = ? OR path LIKE ?)
+      AND (path = ? OR substr(path, 1, length(?)) = ?)
   `);
 
   return programs.map((program) => {
     const installLocation = cleanPath(program.installLocation);
-    const prefix = installLocation ? `${installLocation}\\%` : "";
+    const prefix = installLocation ? pathPrefix(installLocation) : "";
 
     let size = Number(program.estimatedSizeKB || 0) * 1024;
     let fileCount = 0;
-    let sizeBasis = "windows-estimated-install-size";
+    let sizeBasis = program.estimatedSizeKB ? "package-manager-or-registry-estimate" : "not-available";
 
     if (installLocation && prefix) {
-      const row = indexedSizeStatement.get(installLocation, prefix);
+      const row = indexedSizeStatement.get(installLocation, prefix, prefix);
       const indexedSize = Number(row?.totalSize) || 0;
 
       if (indexedSize > 0) {
@@ -168,6 +169,7 @@ async function buildProgramStorageRows(db) {
       size,
       fileCount,
       sizeBasis,
+      estimatedSizeKB: Number(program.estimatedSizeKB) || 0,
     };
   });
 }

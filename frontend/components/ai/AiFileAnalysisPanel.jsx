@@ -49,7 +49,7 @@ export default function AiFileAnalysisPanel({ item, onClose }) {
         </div>
 
         {loading ? (
-          <div style={{ color: "#8f98a8", padding: 50, textAlign: "center" }}>Collecting local evidence and asking Azure OpenAI...</div>
+          <div style={{ color: "#8f98a8", padding: 50, textAlign: "center" }}>Collecting local evidence and running the configured analysis provider…</div>
         ) : error ? (
           <div style={{ background: "#30181b", color: "#ffb4b4", padding: 14, borderRadius: 10 }}>{error}</div>
         ) : data ? (

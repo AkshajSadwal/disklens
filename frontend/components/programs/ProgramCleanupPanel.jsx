@@ -48,9 +48,8 @@ export default function ProgramCleanupPanel({ onClose, onReviewDelete, embedded 
 
   const filteredPrograms = useMemo(() => {
     const q = programQuery.trim().toLowerCase();
-    const ordered = [...programs].sort((a, b) => Number(b.estimatedSizeKB || 0) - Number(a.estimatedSizeKB || 0) || String(a.name || "").localeCompare(String(b.name || "")));
-    if (!q) return ordered;
-    return ordered.filter((program) =>
+    if (!q) return programs;
+    return programs.filter((program) =>
       `${program.name} ${program.publisher} ${program.version}`.toLowerCase().includes(q),
     );
   }, [programs, programQuery]);
@@ -176,7 +175,7 @@ export default function ProgramCleanupPanel({ onClose, onReviewDelete, embedded 
                       <div className="dl-program-icon"><Icon name="programs" size={15} /></div>
                       <div className="dl-program-main">
                         <strong>{program.name}</strong>
-                        <span>{program.publisher || "Unknown publisher"}{program.version ? ` · ${program.version}` : ""} · {Number(program.estimatedSizeKB) > 0 ? formatBytes(Number(program.estimatedSizeKB) * 1024) : "Size unavailable"}</span>
+                        <span>{program.publisher || "Unknown publisher"}{program.version ? ` · ${program.version}` : ""}</span>
                       </div>
                       <Icon name="chevronRight" size={13} />
                     </button>

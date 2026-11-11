@@ -58,11 +58,15 @@ export default function AiStoragePanel({ onClose, embedded = false }) {
 
   useEffect(() => {
     setError("");
+    setSelectedTarget(null);
     setTargetResults([]);
+    const query = targetQuery.trim();
+    setTargetSearchLoading(Boolean(query));
+
     if (targetType === "program") {
-      const q = targetQuery.trim().toLowerCase();
+      const q = query.toLowerCase();
       if (!q) {
-        setTargetResults([]);
+        setTargetSearchLoading(false);
         return;
       }
       setTargetResults(
@@ -71,6 +75,7 @@ export default function AiStoragePanel({ onClose, embedded = false }) {
           .slice(0, 12)
           .map((program) => ({
             type: "program",
+            id: program.id,
             name: program.name,
             version: program.version,
             publisher: program.publisher,
@@ -82,18 +87,15 @@ export default function AiStoragePanel({ onClose, embedded = false }) {
       return;
     }
 
-    if (!targetQuery.trim()) {
-      setTargetResults([]);
+    if (!query) {
       setTargetSearchLoading(false);
       return;
     }
 
     let cancelled = false;
     const timer = setTimeout(async () => {
-      setTargetSearchLoading(true);
-      setTargetResults([]);
       try {
-        const response = await fetch(`${API}/api/ai/storage/search?type=${encodeURIComponent(targetType)}&q=${encodeURIComponent(targetQuery.trim())}`);
+        const response = await fetch(`${API}/api/ai/storage/search?type=${encodeURIComponent(targetType)}&q=${encodeURIComponent(query)}`);
         const data = await response.json().catch(() => null);
         if (!response.ok) throw new Error(data?.error || `HTTP ${response.status}`);
         if (!cancelled) setTargetResults(data.items || []);
@@ -197,9 +199,9 @@ export default function AiStoragePanel({ onClose, embedded = false }) {
       <div className="dl-panel-surface">
         <header className="dl-ai-head">
           <div>
-            <div className="dl-eyebrow">AI POWERED</div>
+            <div className="dl-eyebrow">STORAGE ANALYSIS</div>
             <h2>AI Storage Advisor</h2>
-            <p>Choose exactly what DiskLens analyzes. Your full storage index is never sent.</p>
+            <p>Review storage usage and recommendations.</p>
           </div>
           <div className="dl-ai-head-right">
             <div className="dl-ai-status"><span className={`dl-live-dot ${status?.configured ? "" : "is-off"}`} />{status?.mode === "offline" ? "Local Rules" : status?.configured ? "AI Ready" : "Checking"}</div>
@@ -210,12 +212,12 @@ export default function AiStoragePanel({ onClose, embedded = false }) {
         <div className="dl-ai-modes">
           <button className={`dl-ai-mode ${mode === "top" ? "active" : ""}`} onClick={() => { setMode("top"); resetResults(); }}>
             <div className="dl-ai-mode-index">1</div>
-            <div><strong>Biggest storage</strong><span>Let AI review your largest programs, files and folders.</span></div>
+            <div><strong>Biggest storage</strong><span>Review the largest items in your index.</span></div>
             <Icon name="chevronRight" size={13} />
           </button>
           <button className={`dl-ai-mode ${mode === "target" ? "active" : ""}`} onClick={() => { setMode("target"); resetResults(); }}>
             <div className="dl-ai-mode-index">2</div>
-            <div><strong>Analyze one item</strong><span>Select one program, file or folder and get advice only for it.</span></div>
+            <div><strong>Analyze one item</strong><span>Analyze a specific program, file or folder.</span></div>
             <Icon name="chevronRight" size={13} />
           </button>
         </div>
@@ -244,7 +246,7 @@ export default function AiStoragePanel({ onClose, embedded = false }) {
                   {topLoading ? "Analyzing..." : "Get AI Advice"}
                 </button>
               </div>
-              <div className="dl-ai-note">Only the selected top items are sent to Azure OpenAI. Files use indexed file size; folders use calculated descendant file size.</div>
+              <div className="dl-ai-note">Only selected item details are used for analysis. No files are deleted.</div>
             </div>
           ) : (
             <div className="dl-ai-config">
@@ -256,8 +258,10 @@ export default function AiStoragePanel({ onClose, embedded = false }) {
                 ))}
               </div>
               <input className="dl-ai-search" value={targetQuery} onChange={(e) => setTargetQuery(e.target.value)} placeholder={`Search ${targetType}s by name or path...`} />
-              {targetSearchLoading && <div className="dl-ai-note">Searching indexed storage...</div>}
-              {!targetSearchLoading && targetQuery.trim() && targetResults.length === 0 && !error && <div className="dl-ai-search-state">No matching {targetType}s found.</div>}
+              {targetSearchLoading && <div className="dl-ai-search-state" role="status">Searching…</div>}
+              {!targetSearchLoading && targetQuery.trim() && targetResults.length === 0 && !error && (
+                <div className="dl-ai-search-state">No matching {targetType}s found.</div>
+              )}
               {targetResults.length > 0 && (
                 <div className="dl-ai-results">
                   {targetResults.map((item, index) => {

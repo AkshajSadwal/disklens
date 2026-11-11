@@ -18,7 +18,6 @@ export default function DiskLensApp() {
   const [roots, setRoots] = useState([]);
   const [drives, setDrives] = useState([]);
   const [largestItems, setLargestItems] = useState([]);
-  const [largestFolders, setLargestFolders] = useState([]);
   const [currentPath, setCurrentPath] = useState("");
   const [folderItems, setFolderItems] = useState([]);
   const [backStack, setBackStack] = useState([]);
@@ -31,6 +30,10 @@ export default function DiskLensApp() {
   const [error, setError] = useState("");
   const [sunburstData, setSunburstData] = useState(null);
   const [sunburstLoading, setSunburstLoading] = useState(false);
+  const [scanStatus, setScanStatus] = useState(null);
+  const [scanError, setScanError] = useState("");
+  const [scanStarting, setScanStarting] = useState(false);
+  const [lastRefreshedScanId, setLastRefreshedScanId] = useState(null);
 
   const totalSize = useMemo(
     () => folderItems.reduce((sum, item) => sum + Number(item.size || 0), 0),
@@ -40,11 +43,10 @@ export default function DiskLensApp() {
   useEffect(() => {
     async function loadOverview() {
       try {
-        const [rootsResponse, drivesResponse, largestResponse, largestFoldersResponse] = await Promise.all([
+        const [rootsResponse, drivesResponse, largestResponse] = await Promise.all([
           fetch(`${API}/api/roots`),
           fetch(`${API}/api/drives`).catch(() => null),
           fetch(`${API}/api/items?page=1&limit=7&sort=size&order=desc`).catch(() => null),
-          fetch(`${API}/api/items?page=1&limit=7&sort=size&order=desc&type=directory`).catch(() => null),
         ]);
 
         if (!rootsResponse.ok) throw new Error(`HTTP ${rootsResponse.status}`);
@@ -66,6 +68,92 @@ export default function DiskLensApp() {
 
     loadOverview();
   }, [refreshTick]);
+
+  useEffect(() => {
+    const root = scanStatus?.root;
+    if (!root || ["completed", "aborted", "interrupted", "failed"].includes(scanStatus?.status)) return;
+    let cancelled = false;
+    async function pollScan() {
+      try {
+        const response = await fetch(`${API}/api/scans/status?root=${encodeURIComponent(root)}`);
+        const data = await response.json().catch(() => null);
+        if (!response.ok || cancelled) return;
+        if (!data?.scan) {
+          setScanStatus((previous) => previous?.status === "starting"
+            ? { ...previous, status: "failed" }
+            : previous);
+          return;
+        }
+        const next = data.scan;
+        setScanStatus((previous) => {
+          if (previous && previous.scanId === next.scanId && previous.status === next.status &&
+              previous.scannedCount === next.scannedCount && previous.uploadedCount === next.uploadedCount &&
+              previous.skippedCount === next.skippedCount && previous.totalEstimate === next.totalEstimate) return previous;
+          return next;
+        });
+        if (next.status === "completed" && next.scanId && next.scanId !== lastRefreshedScanId) {
+          setLastRefreshedScanId(next.scanId);
+          setRefreshTick((value) => value + 1);
+        }
+      } catch (err) {
+        if (!cancelled) setScanError(err.message);
+      }
+    }
+    pollScan();
+    const timer = setInterval(pollScan, 1200);
+    return () => { cancelled = true; clearInterval(timer); };
+  }, [scanStatus?.root, scanStatus?.status, lastRefreshedScanId]);
+
+  async function pickScanLocation() {
+    setScanError("");
+    try {
+      const response = await fetch(`${API}/api/scans/pick`, { method: "POST" });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(data?.error || `Could not open folder picker (${response.status}).`);
+      if (data?.cancelled || !data?.root) return null;
+      const selectedRoot = data.root;
+      setRoots((previous) => previous.some((item) => item.root === selectedRoot)
+        ? previous
+        : [...previous, { root: selectedRoot, size: 0, itemCount: 0, fileCount: 0, folderCount: 0 }]);
+      return selectedRoot;
+    } catch (err) {
+      setScanError(err.message);
+      return null;
+    }
+  }
+
+  async function startScan(root) {
+    if (!root || scanStarting || scanStatus?.status === "running" || scanStatus?.status === "starting") return;
+    setScanStarting(true);
+    setScanError("");
+    setScanStatus({ root, status: "starting", scannedCount: 0, uploadedCount: 0, skippedCount: 0, totalEstimate: 0 });
+    try {
+      const response = await fetch(`${API}/api/scans/run`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ root, addNewRoot: true }),
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(data?.error || `Could not start scan (${response.status}).`);
+      setScanStatus((previous) => previous ? { ...previous, status: "starting", root: data.root || root } : previous);
+    } catch (err) {
+      setScanError(err.message);
+      setScanStatus((previous) => previous ? { ...previous, status: "failed" } : previous);
+    } finally {
+      setScanStarting(false);
+    }
+  }
+
+  async function cancelScan(root) {
+    try {
+      const response = await fetch(`${API}/api/scans/cancel`, {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ root }),
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(data?.error || `Could not cancel scan (${response.status}).`);
+    } catch (err) { setScanError(err.message); }
+  }
 
   useEffect(() => {
     if (!currentPath) return;
@@ -228,15 +316,19 @@ export default function DiskLensApp() {
 
   function getBreadcrumbs() {
     if (!currentPath) return [];
-    const parts = currentPath.split("\\");
+    const windowsPath = /^[A-Za-z]:[\\/]/.test(currentPath);
+    const separator = windowsPath ? "\\" : "/";
+    const parts = currentPath.split(/[\\/]+/).filter(Boolean);
     const breadcrumbs = [];
-    let accumulated = "";
-    parts.forEach((part, index) => {
-      if (!part) return;
-      if (index === 0) accumulated = `${part}\\`;
-      else accumulated += `${part}\\`;
-      breadcrumbs.push({ name: part, path: index === 0 ? `${part}\\` : accumulated.replace(/\\$/, "") });
-    });
+    let accumulated = windowsPath ? `${parts.shift()}\\` : currentPath.startsWith("/") ? "/" : "";
+    if (windowsPath) breadcrumbs.push({ name: accumulated.slice(0, 2), path: accumulated });
+    else if (currentPath.startsWith("/")) breadcrumbs.push({ name: "/", path: "/" });
+    for (const part of parts) {
+      accumulated = accumulated === "/" || accumulated.endsWith("\\") || accumulated === ""
+        ? `${accumulated}${part}`
+        : `${accumulated}${separator}${part}`;
+      breadcrumbs.push({ name: part, path: accumulated });
+    }
     return breadcrumbs;
   }
 
@@ -258,11 +350,24 @@ export default function DiskLensApp() {
             drives={drives}
             roots={roots}
             largestItems={largestItems}
-            largestFolders={largestFolders}
             onOpenRoot={(root) => goRoot(root)}
             onOpenItem={openDetails}
             onOpenPrograms={() => setView("programs")}
             onOpenAI={() => setView("ai")}
+            scanStatus={scanStatus}
+            scanStarting={scanStarting}
+            scanError={scanError}
+            onScanNow={startScan}
+            onAddScanLocation={pickScanLocation}
+            onCancelScan={cancelScan}
+            onViewAllStorage={() => {
+              if (roots.length) {
+                setCurrentPath(roots[0].root);
+                setBackStack([]);
+                setForwardStack([]);
+              }
+              setView("storage");
+            }}
           />
         )}
 

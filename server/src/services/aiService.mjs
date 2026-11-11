@@ -257,7 +257,7 @@ function localRuleAnalysis(kind, input) {
       score += 12;
       indicators.push("Windows Mark-of-the-Web metadata suggests the file may have originated from the internet.");
     }
-    if (/\\(temp|tmp|downloads?)\\/i.test(pathValue)) {
+    if (/[\\/](temp|tmp|downloads?)[\\/]/i.test(pathValue)) {
       score += 5;
       indicators.push("The file is in a temporary or downloads location.");
     }
@@ -290,9 +290,9 @@ function localRuleAnalysis(kind, input) {
     const rowPath = String(row.path || "").toLowerCase();
     const rowBytes = bytes(row.size ?? row.indexedBytes);
     if (!rowBytes) continue;
-    const protectedPath = /\\(windows|system32|program files|programdata)\\/i.test(rowPath);
+    const protectedPath = /[\\/](windows|system32|program files|programdata)[\\/]/i.test(rowPath);
     const likelyReview = /\.(iso|zip|7z|rar|msi|exe|dmp|log|tmp)$/i.test(rowName)
-      || /\\(downloads|temp|cache|logs?)\\/i.test(rowPath);
+      || /[\\/](downloads|temp|cache|logs?)[\\/]/i.test(rowPath);
     if (protectedPath) continue;
     if (likelyReview || rowBytes >= 2 * 1024 ** 3) {
       suggestions.push({

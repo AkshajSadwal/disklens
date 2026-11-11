@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { API } from "../lib/api";
 import Icon from "./common/Icon";
 import { formatBytes } from "../lib/formatters";
 
@@ -55,7 +56,7 @@ function StorageRing({ used, total }) {
     <div
       className="dl-home-storage-ring"
       style={{
-        background: `conic-gradient(#2f73ed 0 ${percent}%, #35c989 ${percent}% 100%)`,
+        background: `conic-gradient(#2f73ed 0 ${percent}%, #d9e0e8 ${percent}% 100%)`,
       }}
     >
       <div>
@@ -74,10 +75,25 @@ export default function HomeDashboard({
   onOpenItem,
   onOpenPrograms,
   onOpenAI,
+  onViewAllStorage,
+  scanStatus,
+  scanStarting,
+  scanError,
+  onScanNow,
+  onAddScanLocation,
+  onCancelScan,
 }) {
   const [largestFilter, setLargestFilter] = useState("all");
   const [largestFolders, setLargestFolders] = useState([]);
   const [foldersLoading, setFoldersLoading] = useState(false);
+  const [programs, setPrograms] = useState([]);
+  const [programsLoading, setProgramsLoading] = useState(false);
+  const [selectedScanRoot, setSelectedScanRoot] = useState(roots?.[0]?.root || "");
+
+  useEffect(() => {
+    if (!roots?.length) { setSelectedScanRoot(""); return; }
+    if (!roots.some((root) => root.root === selectedScanRoot)) setSelectedScanRoot(roots[0].root);
+  }, [roots, selectedScanRoot]);
 
   const driveMap = new Map(
     (drives || []).map((item) => [
@@ -103,9 +119,7 @@ export default function HomeDashboard({
         const responses = await Promise.all(
           roots.map(async (root) => {
             const response = await fetch(
-              `http://127.0.0.1:4000/api/folders?path=${encodeURIComponent(
-                root.root,
-              )}`,
+              `${API}/api/folders?path=${encodeURIComponent(root.root)}`,
             );
 
             if (!response.ok) {
@@ -146,6 +160,25 @@ export default function HomeDashboard({
       cancelled = true;
     };
   }, [roots]);
+  useEffect(() => {
+    let cancelled = false;
+    async function loadPrograms() {
+      setProgramsLoading(true);
+      try {
+        const response = await fetch(`${API}/api/programs`);
+        const data = await response.json().catch(() => null);
+        if (!response.ok) throw new Error(data?.error || `HTTP ${response.status}`);
+        if (!cancelled) setPrograms(Array.isArray(data?.programs) ? data.programs : []);
+      } catch {
+        if (!cancelled) setPrograms([]);
+      } finally {
+        if (!cancelled) setProgramsLoading(false);
+      }
+    }
+    loadPrograms();
+    return () => { cancelled = true; };
+  }, [roots]);
+
   const normalizeRoot = (root) =>
     String(root || "")
       .replace(/[\\/]+$/, "")
@@ -168,12 +201,21 @@ export default function HomeDashboard({
   );
   const hasDriveMetadata = validDrives.length > 0;
 
+  // Prefer indexed install-location bytes; otherwise use the OS/package estimate.
+  // Unknown sizes sort last, rather than inheriting discovery order.
+  const getProgramSize = (program) => Number(program.size) > 0
+    ? Number(program.size)
+    : (Number(program.estimatedSizeKB) || 0) * 1024;
+  const programsBySize = [...programs].sort((a, b) => {
+    const sizeDiff = getProgramSize(b) - getProgramSize(a);
+    return sizeDiff || String(a.name || "").localeCompare(String(b.name || ""));
+  });
+
   const fileItems = (largestItems || []).filter((item) => item.type === "file");
   const folderItems =
     largestFolders.length > 0
       ? largestFolders
       : (largestItems || []).filter((item) => item.type === "directory");
-  const biggest = largestItems?.[0];
   const filteredLargest =
     largestFilter === "files"
       ? fileItems
@@ -251,12 +293,12 @@ export default function HomeDashboard({
               </div>
             </div>
 
-            <div className="dl-home-stat-card green">
+            <div className="dl-home-stat-card neutral">
               <div className="dl-home-stat-icon">
                 <div
                   className="dl-home-mini-ring free"
                   style={{
-                    background: `conic-gradient(#19ad6b 0 ${total ? (free / total) * 100 : 0}%, #dff2e8 0 100%)`,
+                    background: `conic-gradient(#98a3b2 0 ${total ? (free / total) * 100 : 0}%, #e8edf2 0 100%)`,
                   }}
                 />
               </div>
@@ -276,7 +318,7 @@ export default function HomeDashboard({
             <div className="dl-home-panel-head">
               <div>
                 <h2>Drives</h2>
-                <p>Actual capacity from Windows.</p>
+                <p>Actual capacity reported by your system.</p>
               </div>
               <button
                 className="dl-home-link"
@@ -306,7 +348,7 @@ export default function HomeDashboard({
               </div>
               <button
                 className="dl-home-link"
-                onClick={() => onOpenRoot(roots?.[0]?.root)}
+                onClick={onViewAllStorage}
               >
                 View All <Icon name="chevronRight" size={15} />
               </button>
@@ -325,7 +367,6 @@ export default function HomeDashboard({
                   type="button"
                   onClick={() => {
                     setLargestFilter(value);
-                    if (value === "programs") onOpenPrograms();
                   }}
                 >
                   {label}
@@ -333,6 +374,28 @@ export default function HomeDashboard({
               ))}
             </div>
 
+            {largestFilter === "programs" ? (
+              <div className="dl-home-program-list">
+                <div className="dl-home-program-row is-heading">
+                  <span>#</span><span>Program</span><span>Publisher</span><span>Size</span><span>Version</span>
+                </div>
+                {programsLoading ? (
+                  <div className="dl-home-empty">Loading installed programs…</div>
+                ) : programs.length ? (
+                  programsBySize.slice(0, 5).map((program, index) => (
+                    <div className="dl-home-program-row" key={`${program.name}|${program.version || ""}|${index}`}>
+                      <span className="dl-home-rank">{index + 1}</span>
+                      <span className="dl-home-program-name">{program.name || "Unnamed program"}</span>
+                      <span className="dl-home-program-publisher">{program.publisher || "Unknown publisher"}</span>
+                      <span className="dl-home-program-size" title={program.sizeBasis === "indexed-install-location-size" ? "Calculated from indexed files under the install location" : "Estimated size reported by the operating system"}>{getProgramSize(program) > 0 ? formatBytes(getProgramSize(program)) : "—"}</span>
+                      <span className="dl-home-program-version">{program.version || "—"}</span>
+                    </div>
+                  ))
+                ) : (
+                  <div className="dl-home-empty">No installed programs found.</div>
+                )}
+              </div>
+            ) : (
             <div className="dl-home-table">
               <div className="dl-home-table-head">
                 <span>#</span>
@@ -373,11 +436,7 @@ export default function HomeDashboard({
                 </button>
               ))}
               {!filteredLargest.length &&
-                (largestFilter === "programs" ? (
-                  <div className="dl-home-empty">
-                    Open Programs & Cleanup to review installed programs.
-                  </div>
-                ) : largestFilter === "folders" && foldersLoading ? (
+                (largestFilter === "folders" && foldersLoading ? (
                   <div className="dl-home-empty">Loading indexed folders…</div>
                 ) : (
                   <div className="dl-home-empty">
@@ -385,32 +444,57 @@ export default function HomeDashboard({
                   </div>
                 ))}
             </div>
+            )}
           </section>
         </div>
 
         <aside className="dl-home-side-column">
-          <section className="dl-home-quote">
-            <span>“</span>
-            <p>A cleaner drive leads to a clearer mind.</p>
-            <div className="dl-home-quote-art" aria-hidden="true">
-              <i />
-              <b />
-              <em />
-              <strong />
-            </div>
-          </section>
-
           <section className="dl-home-panel dl-home-quick">
             <div className="dl-home-panel-head">
               <div>
                 <h2>Quick Actions</h2>
               </div>
             </div>
-            <button onClick={() => onOpenRoot(roots?.[0]?.root)}>
-              <span>
-                <Icon name="scan" size={17} />
-              </span>
-              <strong>Scan Now</strong>
+            <div className="dl-home-scan-picker">
+              <div className="dl-home-scan-label-row">
+                <label htmlFor="dl-scan-root">Location to scan</label>
+                <button type="button" className="dl-home-add-location" onClick={async () => {
+                  const root = await onAddScanLocation?.();
+                  if (root) setSelectedScanRoot(root);
+                }} disabled={scanStarting || scanStatus?.status === "running" || scanStatus?.status === "starting"}>
+                  <Icon name="folder-plus" size={14} /> Add folder
+                </button>
+              </div>
+              <select id="dl-scan-root" value={selectedScanRoot} onChange={(event) => setSelectedScanRoot(event.target.value)} disabled={!roots?.length || scanStarting || scanStatus?.status === "running" || scanStatus?.status === "starting"}>
+                {(roots || []).length ? (roots || []).map((root) => <option key={root.root} value={root.root}>{root.root}</option>) : <option value="">No locations indexed yet</option>}
+              </select>
+              <button type="button" onClick={() => onScanNow?.(selectedScanRoot)} disabled={!selectedScanRoot || scanStarting || scanStatus?.status === "running" || scanStatus?.status === "starting"}>
+                <span><Icon name="scan" size={17} /></span>
+                <strong>{scanStarting || scanStatus?.status === "starting" ? "Starting…" : "Scan Now"}</strong>
+                <Icon name="chevronRight" size={15} />
+              </button>
+              {(scanStatus?.status === "running" || scanStatus?.status === "starting") && scanStatus.root === selectedScanRoot && (
+                <div className="dl-home-scan-progress" aria-live="polite">
+                  <div className="dl-home-scan-status">{scanStatus.status === "starting" ? "Starting scan…" : `Scanning ${scanStatus.root}`}</div>
+                  {Number(scanStatus.totalEstimate) > 0 ? (
+                    <>
+                      <div className="dl-home-scan-track"><span style={{ width: `${Math.min(100, (Number(scanStatus.scannedCount || 0) / Number(scanStatus.totalEstimate)) * 100)}%` }} /></div>
+                      <div className="dl-home-scan-meta">{Number(scanStatus.scannedCount || 0).toLocaleString()} / {Number(scanStatus.totalEstimate).toLocaleString()} items · {Number(scanStatus.uploadedCount || 0).toLocaleString()} uploaded</div>
+                    </>
+                  ) : <div className="dl-home-scan-meta">Estimating the number of items…</div>}
+                  <button type="button" className="dl-home-scan-cancel" onClick={() => onCancelScan?.(selectedScanRoot)}>Cancel scan</button>
+                </div>
+              )}
+              {scanStatus?.root === selectedScanRoot && ["completed", "aborted", "interrupted", "failed"].includes(scanStatus.status) && (
+                <div className={`dl-home-scan-result ${scanStatus.status === "completed" ? "is-complete" : "is-warning"}`}>
+                  {scanStatus.status === "completed" ? `Scan complete · ${Number(scanStatus.itemCount || scanStatus.scannedCount || 0).toLocaleString()} indexed` : scanStatus.status === "aborted" ? "Scan cancelled. Previous index was kept." : scanStatus.status === "failed" ? "Scan could not be started." : "Scan was interrupted. Previous index was kept."}
+                </div>
+              )}
+              {scanError && <div className="dl-home-scan-error">{scanError}</div>}
+            </div>
+            <button onClick={() => onOpenRoot(selectedScanRoot)} disabled={!selectedScanRoot}>
+              <span><Icon name="folder" size={17} /></span>
+              <strong>Browse Storage</strong>
               <Icon name="chevronRight" size={15} />
             </button>
             <button onClick={onOpenAI}>
@@ -466,7 +550,6 @@ export default function HomeDashboard({
             </div>
           </section>
         </aside>
-
 
       </div>
     </div>
