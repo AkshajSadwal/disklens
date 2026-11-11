@@ -23,8 +23,11 @@ function clampLimit(value) {
   return Math.min(MAX_LIMIT, Math.max(1, Math.floor(parsed)));
 }
 
-function folderDepth(pathValue) {
-  return (String(pathValue ?? "").match(/[\\/]/g) || []).length;
+function indexedPathRange(value) {
+  const prefix = pathPrefix(value);
+  if (!prefix) return null;
+  const upperBound = `${prefix.slice(0, -1)}${String.fromCharCode(prefix.charCodeAt(prefix.length - 1) + 1)}`;
+  return { prefix, upperBound, caseInsensitive: path.sep === "\\" };
 }
 
 function serializeFile(row) {
@@ -44,19 +47,22 @@ function getFolderAggregate(db, folderPath) {
   const prefix = pathPrefix(folderPath);
   if (!prefix) return null;
 
+  const upperBound = `${prefix.slice(0, -1)}${String.fromCharCode(prefix.charCodeAt(prefix.length - 1) + 1)}`;
+  const collation = path.sep === "\\" ? " COLLATE NOCASE" : "";
   const row = db.prepare(`
     SELECT
       COALESCE(SUM(CASE WHEN type = 'file' THEN size ELSE 0 END), 0) AS totalSize,
       COUNT(CASE WHEN type = 'file' THEN 1 END) AS fileCount,
-      COUNT(CASE WHEN type = 'directory' THEN 1 END) - 1 AS folderCount
+      COUNT(CASE WHEN type = 'directory' THEN 1 END) - 1 AS directoryCount
     FROM items
-    WHERE path = ? OR substr(path, 1, length(?)) = ?
-  `).get(cleanPath(folderPath), prefix, prefix);
+    WHERE path = ?${collation}
+      OR (path > ?${collation} AND path < ?${collation})
+  `).get(cleanPath(folderPath), prefix, upperBound);
 
   return {
     totalSize: Number(row?.totalSize) || 0,
     fileCount: Number(row?.fileCount) || 0,
-    folderCount: Math.max(Number(row?.folderCount) || 0, 0),
+    folderCount: Math.max(Number(row?.directoryCount) || 0, 0),
   };
 }
 
@@ -89,20 +95,22 @@ function getTopLevelFolders(db, limit) {
     const rootClean = cleanPath(root);
     if (!rootClean) continue;
 
-    const rootDepth = folderDepth(rootClean);
-    const isVolumeRoot = path.parse(rootClean).root === rootClean;
-    const targetDepth = rootDepth + (isVolumeRoot ? 0 : 1);
+    const range = indexedPathRange(rootClean);
+    if (!range) continue;
+    const collation = range.caseInsensitive ? " COLLATE NOCASE" : "";
 
+    // Restrict candidate directories to direct children in SQLite. Previously
+    // every directory on a drive was copied into Node and depth-filtered.
     const candidates = db.prepare(`
       SELECT id, root, path, name, created_at AS createdAt, modified_at AS modifiedAt
       FROM items
       WHERE type = 'directory' AND root = ?
+        AND path > ?${collation} AND path < ?${collation}
+        AND instr(substr(path, length(?) + 1), ?) = 0
       ORDER BY path
-    `).all(root);
+    `).all(root, range.prefix, range.upperBound, range.prefix, path.sep);
 
     for (const row of candidates) {
-      const depth = folderDepth(row.path);
-      if (depth !== targetDepth) continue;
 
       const aggregate = getFolderAggregate(db, row.path);
       if (!aggregate || aggregate.totalSize <= 0) continue;
@@ -212,7 +220,25 @@ export async function getTopStorageSnapshot(db, options = {}) {
   }
 
   if (include.programs) {
-    const programs = await buildProgramStorageRows(db);
+    // A top-storage preview should stay responsive. Rank applications using
+    // their registry/package estimates; precise indexed size is calculated on
+    // demand for an individual selected program below, not with one database
+    // aggregation per installed application.
+    const programs = (await discoverInstalledPrograms()).map((program) => {
+      const estimatedSizeKB = Number(program.estimatedSizeKB) || 0;
+      return {
+        type: "program",
+        name: program.name,
+        version: program.version || "",
+        publisher: program.publisher || "",
+        installLocation: program.installLocation || "",
+        displayIcon: program.displayIcon || "",
+        size: estimatedSizeKB * 1024,
+        fileCount: 0,
+        sizeBasis: estimatedSizeKB > 0 ? "package-manager-or-registry-estimate" : "not-available",
+        estimatedSizeKB,
+      };
+    });
     programs.sort((a, b) => (b.size - a.size) || a.name.localeCompare(b.name));
     snapshot.entities.programs = programs.slice(0, limit);
   }
@@ -268,23 +294,25 @@ export async function getStorageTarget(db, target = {}) {
   }
 
   if (type === "program") {
-    const programs = await buildProgramStorageRows(db);
+    const discoveredPrograms = await discoverInstalledPrograms();
     const name = String(target.name || "").trim().toLowerCase();
     const version = String(target.version || "").trim().toLowerCase();
     const publisher = String(target.publisher || "").trim().toLowerCase();
 
-    const exact = programs.find((program) =>
-      program.name.toLowerCase() === name &&
-      (!version || program.version.toLowerCase() === version) &&
-      (!publisher || program.publisher.toLowerCase() === publisher),
+    const selected = discoveredPrograms.find((program) =>
+      String(program.name || "").trim().toLowerCase() === name &&
+      (!version || String(program.version || "").trim().toLowerCase() === version) &&
+      (!publisher || String(program.publisher || "").trim().toLowerCase() === publisher),
     );
 
-    if (!exact) {
+    if (!selected) {
       const error = new Error("The selected program was not found.");
       error.code = "TARGET_NOT_FOUND";
       throw error;
     }
 
+    // Only one indexed install-location lookup is needed for a selected item.
+    const [exact] = await buildProgramStorageRows(db, [selected]);
     return exact;
   }
 

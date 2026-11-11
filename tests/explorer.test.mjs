@@ -59,9 +59,11 @@ test("explorer search filters, paginates, and calculates folder sizes from index
   assert.equal(badSearchField.statusCode, 400);
 
   const pathIndex = process.platform === "win32" ? "idx_items_path_nocase" : "idx_items_path";
+  const prefix = `${root}${path.sep}`;
+  const upperBound = `${prefix.slice(0, -1)}${String.fromCharCode(prefix.charCodeAt(prefix.length - 1) + 1)}`;
   const pathPlan = process.platform === "win32"
-    ? db.prepare("EXPLAIN QUERY PLAN SELECT id FROM items WHERE path LIKE ? ESCAPE '\\' COLLATE NOCASE").all(`${root.replace(/[\\%_]/g, (character) => `\\${character}`)}%`)
-    : db.prepare("EXPLAIN QUERY PLAN SELECT id FROM items WHERE path GLOB ?").all(`${root.replace(/([\\[*?])/g, "[$1]")}/*`);
+    ? db.prepare("EXPLAIN QUERY PLAN SELECT id FROM items WHERE path > ? COLLATE NOCASE AND path < ? COLLATE NOCASE").all(prefix, upperBound)
+    : db.prepare("EXPLAIN QUERY PLAN SELECT id FROM items WHERE path > ? AND path < ?").all(prefix, upperBound);
   assert.ok(pathPlan.some((row) => String(row.detail).includes(pathIndex)), `Expected indexed path-prefix search, got: ${pathPlan.map((row) => row.detail).join("; ")}`);
 });
 
@@ -97,7 +99,11 @@ test("POSIX path-prefix searches preserve case and escape glob metacharacters", 
   assert.deepEqual(literalStar.items.map((item) => item.path).sort(), [
     "/fixture/A*/Report.txt", "/fixture/A*/literal?[x]/child.txt",
   ]);
-  const pathPlan = db.prepare("EXPLAIN QUERY PLAN SELECT id FROM items WHERE path GLOB ?").all("/fixture/A/*");
+  const alphaScope = await invoke({ path: "/fixture/Alpha" });
+  assert.deepEqual(alphaScope.items.map((item) => item.path).sort(), [
+    "/fixture/Alpha/other.txt",
+  ]);
+  const pathPlan = db.prepare("EXPLAIN QUERY PLAN SELECT id FROM items WHERE path > ? AND path < ?").all("/fixture/A/", "/fixture/A0");
   assert.ok(pathPlan.some((row) => String(row.detail).includes("idx_items_path")), `Expected indexed POSIX path-prefix search, got: ${pathPlan.map((row) => row.detail).join("; ")}`);
 });
 
@@ -115,4 +121,7 @@ test("Windows path-prefix searches match case-insensitively", async (t) => {
   const result = await handlers.get("/api/explorer/search")({ query: { path: "C:\\Root", qField: "path", q: "c:\\root\\alpha" } }, reply);
   assert.equal(reply.statusCode || 200, 200);
   assert.deepEqual((result.items || reply.payload.items).map((item) => item.path).sort(), ["C:\\Root\\Alpha", "C:\\Root\\Alpha\\report.txt"]);
+  const scopeReply = { code(value) { this.statusCode = value; return this; }, send(value) { this.payload = value; return value; } };
+  const scoped = await handlers.get("/api/explorer/search")({ query: { path: "c:\\root\\alpha" } }, scopeReply);
+  assert.deepEqual((scoped.items || scopeReply.payload.items).map((item) => item.path).sort(), ["C:\\Root\\Alpha", "C:\\Root\\Alpha\\report.txt"]);
 });

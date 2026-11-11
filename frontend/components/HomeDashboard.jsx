@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { API } from "../lib/api";
 import Icon from "./common/Icon";
 import { formatBytes } from "../lib/formatters";
@@ -124,17 +124,19 @@ export default function HomeDashboard({
       : [...current, root]);
   }
 
-  const driveMap = new Map(
+  const driveMap = useMemo(() => new Map(
     (drives || []).map((item) => [
-      String(item.root || "")
-        .replace(/[\\/]+$/, "")
-        .toUpperCase(),
+      String(item.root || "").replace(/[\\/]+$/, "").toUpperCase(),
       item,
     ]),
-  );
+  ), [drives]);
 
   useEffect(() => {
+    // Folder size aggregation is more expensive than the default largest-item
+    // query. Only request it when the user opens the Folders filter.
+    if (largestFilter !== "folders") return undefined;
     let cancelled = false;
+    const controller = new AbortController();
 
     async function loadLargestFolders() {
       if (!roots?.length) {
@@ -149,6 +151,7 @@ export default function HomeDashboard({
           roots.map(async (root) => {
             const response = await fetch(
               `${API}/api/folders?path=${encodeURIComponent(root.root)}`,
+              { signal: controller.signal },
             );
 
             if (!response.ok) {
@@ -187,8 +190,9 @@ export default function HomeDashboard({
 
     return () => {
       cancelled = true;
+      controller.abort();
     };
-  }, [roots]);
+  }, [roots, largestFilter]);
   useEffect(() => {
     // Installed-program discovery is relatively expensive on Windows. Keep
     // the Home overview responsive and fetch this list only when its tab is
@@ -217,22 +221,15 @@ export default function HomeDashboard({
     String(root || "")
       .replace(/[\\/]+$/, "")
       .toUpperCase();
-  const validDrives = (drives || []).filter(
-    (drive) => Number(drive.totalBytes) > 0,
+  const validDrives = useMemo(
+    () => (drives || []).filter((drive) => Number(drive.totalBytes) > 0),
+    [drives],
   );
-
-  const total = validDrives.reduce(
-    (sum, drive) => sum + Number(drive.totalBytes || 0),
-    0,
-  );
-  const used = validDrives.reduce(
-    (sum, drive) => sum + Number(drive.usedBytes || 0),
-    0,
-  );
-  const free = validDrives.reduce(
-    (sum, drive) => sum + Number(drive.freeBytes || 0),
-    0,
-  );
+  const { total, used, free } = useMemo(() => validDrives.reduce((sum, drive) => ({
+    total: sum.total + Number(drive.totalBytes || 0),
+    used: sum.used + Number(drive.usedBytes || 0),
+    free: sum.free + Number(drive.freeBytes || 0),
+  }), { total: 0, used: 0, free: 0 }), [validDrives]);
   const hasDriveMetadata = validDrives.length > 0;
 
   useEffect(() => {
@@ -257,24 +254,23 @@ export default function HomeDashboard({
   const getProgramSize = (program) => Number(program.size) > 0
     ? Number(program.size)
     : (Number(program.estimatedSizeKB) || 0) * 1024;
-  const programsBySize = [...programs].sort((a, b) => {
+  const programsBySize = useMemo(() => [...programs].sort((a, b) => {
     const sizeDiff = getProgramSize(b) - getProgramSize(a);
     return sizeDiff || String(a.name || "").localeCompare(String(b.name || ""));
-  });
+  }), [programs]);
 
-  const fileItems = (largestItems || []).filter((item) => item.type === "file");
-  const folderItems =
-    largestFolders.length > 0
-      ? largestFolders
-      : (largestItems || []).filter((item) => item.type === "directory");
-  const filteredLargest =
-    largestFilter === "files"
-      ? fileItems
-      : largestFilter === "folders"
-        ? folderItems
-        : largestFilter === "programs"
-          ? []
-          : largestItems || [];
+  const fileItems = useMemo(() => (largestItems || []).filter((item) => item.type === "file"), [largestItems]);
+  const folderItems = useMemo(
+    () => largestFolders.length > 0 ? largestFolders : (largestItems || []).filter((item) => item.type === "directory"),
+    [largestFolders, largestItems],
+  );
+  const filteredLargest = largestFilter === "files"
+    ? fileItems
+    : largestFilter === "folders"
+      ? folderItems
+      : largestFilter === "programs"
+        ? []
+        : largestItems || [];
 
   return (
     <div className="dl-home">

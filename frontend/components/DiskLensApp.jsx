@@ -45,23 +45,26 @@ export default function DiskLensApp() {
   );
 
   useEffect(() => {
+    const controller = new AbortController();
+    const { signal } = controller;
+
     async function loadOverview() {
-      // The drive-capacity endpoint may wait on Windows CIM/WMI. Do not make
-      // indexed roots and largest items wait for that independent lookup.
-      fetch(`${API}/api/drives`)
+      // Drive-capacity discovery can be slower on Windows. Keep it independent
+      // from the indexed overview so the dashboard can render immediately.
+      fetch(`${API}/api/drives`, { signal })
         .then(async (response) => {
           if (!response.ok) throw new Error(`HTTP ${response.status}`);
           return response.json();
         })
-        .then((data) => setDrives(Array.isArray(data) ? data : []))
-        .catch(() => setDrives([]));
+        .then((data) => { if (!signal.aborted) setDrives(Array.isArray(data) ? data : []); })
+        .catch(() => { if (!signal.aborted) setDrives([]); });
 
       try {
         const [rootsResponse, largestResponse] = await Promise.all([
-          fetch(`${API}/api/roots`),
-          fetch(`${API}/api/items?page=1&limit=7&sort=size&order=desc`).catch(() => null),
+          fetch(`${API}/api/roots`, { signal }),
+          fetch(`${API}/api/items?page=1&limit=7&sort=size&order=desc`, { signal }).catch(() => null),
         ]);
-
+        if (signal.aborted) return;
         if (!rootsResponse.ok) throw new Error(`HTTP ${rootsResponse.status}`);
         const rootData = await rootsResponse.json();
         const safeRoots = Array.isArray(rootData) ? rootData : [];
@@ -70,16 +73,17 @@ export default function DiskLensApp() {
 
         if (largestResponse?.ok) {
           const data = await largestResponse.json();
-          setLargestItems(Array.isArray(data?.items) ? data.items : []);
+          if (!signal.aborted) setLargestItems(Array.isArray(data?.items) ? data.items : []);
         }
       } catch (err) {
-        setError(err.message);
+        if (!signal.aborted) setError(err.message);
       } finally {
-        setLoading(false);
+        if (!signal.aborted) setLoading(false);
       }
     }
 
     loadOverview();
+    return () => controller.abort();
   }, [refreshTick]);
 
   useEffect(() => {
@@ -239,32 +243,33 @@ export default function DiskLensApp() {
   }
 
   useEffect(() => {
-    if (!currentPath) return;
+    // The folder listing and recursive storage map are intentionally lazy.
+    // Building the map while Home is visible used to issue dozens of subtree
+    // queries against a potentially very large index during application startup.
+    if (view !== "storage" || !currentPath) return undefined;
     let cancelled = false;
+    const controller = new AbortController();
+    const maxConcurrentFolderRequests = 4;
+    let activeFolderRequests = 0;
+    const folderRequestQueue = [];
 
-    async function loadFolder() {
+    async function getChildren(pathValue) {
+      if (activeFolderRequests >= maxConcurrentFolderRequests) {
+        await new Promise((resolve) => folderRequestQueue.push(resolve));
+      }
+      if (cancelled) return [];
+      activeFolderRequests += 1;
       try {
-        const response = await fetch(`${API}/api/folders?path=${encodeURIComponent(currentPath)}`);
+        const response = await fetch(`${API}/api/folders?path=${encodeURIComponent(pathValue)}`, {
+          signal: controller.signal,
+        });
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data = await response.json();
-        if (!cancelled) setFolderItems(data);
-      } catch (err) {
-        if (!cancelled) setError(err.message);
+        return Array.isArray(data) ? data : [];
+      } finally {
+        activeFolderRequests -= 1;
+        folderRequestQueue.shift()?.();
       }
-    }
-
-    loadFolder();
-    return () => { cancelled = true; };
-  }, [currentPath, refreshTick]);
-
-  useEffect(() => {
-    if (!currentPath) return;
-    let cancelled = false;
-
-    async function getChildren(path) {
-      const response = await fetch(`${API}/api/folders?path=${encodeURIComponent(path)}`);
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      return response.json();
     }
 
     async function buildNode(item, depth, totalRootSize) {
@@ -278,10 +283,13 @@ export default function DiskLensApp() {
       return { ...item, children: childNodes };
     }
 
-    async function buildSunburst() {
+    async function loadStorageView() {
       setSunburstLoading(true);
+      setError("");
       try {
         const children = await getChildren(currentPath);
+        if (!cancelled) setFolderItems(children);
+
         const total = children.reduce((sum, child) => sum + Number(child.size || 0), 0);
         const { visible, otherSize } = groupSmallItems(children, total, 0.01, 5);
         const childNodes = await Promise.all(visible.map((child) => buildNode(child, 1, total)));
@@ -298,9 +306,14 @@ export default function DiskLensApp() {
       }
     }
 
-    buildSunburst();
-    return () => { cancelled = true; };
-  }, [currentPath, refreshTick]);
+    loadStorageView();
+    return () => {
+      cancelled = true;
+      controller.abort();
+      // Wake queued requests so they can observe cancellation and exit.
+      while (folderRequestQueue.length) folderRequestQueue.shift()?.();
+    };
+  }, [view, currentPath, refreshTick]);
 
   async function openContainingFolder() {
     if (!selectedItem) return;

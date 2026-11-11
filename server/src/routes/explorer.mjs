@@ -26,24 +26,30 @@ export function registerExplorerRoutes(app, db, { platform = process.platform } 
     const type = String(request.query?.type || "").trim().toLowerCase();
     const scope = String(request.query?.path || "").trim();
     const pathApi = platform === "win32" ? path.win32 : path.posix;
-    const separator = pathApi.sep.replace(/'/g, "''");
-    const effectiveSize = `(CASE WHEN type = 'directory' THEN (SELECT COALESCE(SUM(child.size), 0) FROM items AS child WHERE child.root = items.root AND child.type = 'file' AND substr(child.path, 1, length(items.path) + 1) = items.path || '${separator}') ELSE size END)`;
+    const separator = pathApi.sep;
+    const sqlSeparator = separator.replace(/'/g, "''");
+    const nextSeparator = String.fromCharCode(separator.charCodeAt(0) + 1).replace(/'/g, "''");
+    const isWindows = platform === "win32";
+    // A half-open path range (`parent\` <= path < `parent]`) is indexable.
+    // The previous substr(path, ...) predicate scanned the full index for each
+    // folder-size calculation, which became very expensive on large drives.
+    const pathCollation = isWindows ? " COLLATE NOCASE" : "";
+    const effectiveSize = `(CASE WHEN type = 'directory' THEN (SELECT COALESCE(SUM(child.size), 0) FROM items AS child WHERE child.root = items.root AND child.type = 'file' AND child.path >= (items.path || '${sqlSeparator}')${pathCollation} AND child.path < (items.path || '${nextSeparator}')${pathCollation}) ELSE size END)`;
     const sortColumns = { name: "name COLLATE NOCASE", size: effectiveSize, modified: "modified_at", type: "type" };
     const sort = sortColumns[request.query?.sort] || "name COLLATE NOCASE";
     const order = String(request.query?.order).toLowerCase() === "desc" ? "DESC" : "ASC";
     let page = Math.min(1_000_000, Math.max(1, Number.parseInt(request.query?.page, 10) || 1));
     const limit = Math.min(100, Math.max(1, Number.parseInt(request.query?.limit, 10) || 50));
     const escapeLike = (value) => value.replace(/[\\%_]/g, (character) => `\\${character}`);
-    const escapeGlob = (value) => value.replace(/[\[*?]/g, (character) => ({ "[": "[[]", "*": "[*]", "?": "[?]" })[character]);
     const pathPrefixMatch = (value) => {
       const prefix = value.endsWith(pathApi.sep) ? value : `${value}${pathApi.sep}`;
-      if (platform === "win32") {
-        return {
-          sql: "(path = ? COLLATE NOCASE OR path LIKE ? ESCAPE '\\' COLLATE NOCASE)",
-          params: [value, `${escapeLike(prefix)}%`],
-        };
-      }
-      return { sql: "(path = ? OR path GLOB ?)", params: [value, `${escapeGlob(prefix)}*`] };
+      const upperBound = `${prefix.slice(0, -1)}${String.fromCharCode(prefix.charCodeAt(prefix.length - 1) + 1)}`;
+      return {
+        sql: isWindows
+          ? "(path = ? COLLATE NOCASE OR (path > ? COLLATE NOCASE AND path < ? COLLATE NOCASE))"
+          : "(path = ? OR (path > ? AND path < ?))",
+        params: [value, prefix, upperBound],
+      };
     };
     const conditions = [];
     const params = [];
@@ -77,10 +83,12 @@ export function registerExplorerRoutes(app, db, { platform = process.platform } 
       return reply.code(400).send({ error: "type must be all, file, or folder." });
     }
     if (scope) {
-      const separator = pathApi.sep;
       const prefix = scope.endsWith(separator) ? scope : `${scope}${separator}`;
-      conditions.push("(path = ? OR substr(path, 1, length(?)) = ?)");
-      params.push(scope, prefix, prefix);
+      const upperBound = `${prefix.slice(0, -1)}${String.fromCharCode(prefix.charCodeAt(prefix.length - 1) + 1)}`;
+      conditions.push(isWindows
+        ? "(path = ? COLLATE NOCASE OR (path > ? COLLATE NOCASE AND path < ? COLLATE NOCASE))"
+        : "(path = ? OR (path > ? AND path < ?))");
+      params.push(scope, prefix, upperBound);
     }
     for (const [field, operator] of [["minSize", ">="], ["maxSize", "<="]]) {
       const raw = request.query?.[field];
@@ -133,10 +141,11 @@ export function registerExplorerRoutes(app, db, { platform = process.platform } 
         FROM items AS parent
         LEFT JOIN items AS child
           ON child.root = parent.root
-          AND substr(child.path, 1, length(parent.path) + 1) = parent.path || ?
+          AND child.path >= (parent.path || ?)${isWindows ? " COLLATE NOCASE" : ""}
+          AND child.path < (parent.path || ?)${isWindows ? " COLLATE NOCASE" : ""}
         WHERE parent.id IN (${placeholders})
         GROUP BY parent.id
-      `).all(path.sep, ...ids);
+      `).all(pathApi.sep, String.fromCharCode(pathApi.sep.charCodeAt(0) + 1), ...ids);
       const byId = new Map(aggregates.map((row) => [row.id, row]));
       for (const item of folders) {
         const aggregate = byId.get(item.id);

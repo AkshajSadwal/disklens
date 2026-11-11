@@ -16,7 +16,18 @@ export function isTrustedLocalProxyRequest(request) {
 
   try {
     const originUrl = new URL(origin);
-    return originUrl.origin === requestUrl.origin && LOOPBACK_HOSTS.has(originUrl.hostname.toLowerCase());
+    const originIsLoopback = LOOPBACK_HOSTS.has(originUrl.hostname.toLowerCase());
+    const requestIsHttp = requestUrl.protocol === "http:" || requestUrl.protocol === "https:";
+    const originIsHttp = originUrl.protocol === "http:" || originUrl.protocol === "https:";
+
+    // Browsers may open DiskLens as 127.0.0.1 while Next.js constructs the
+    // internal Request URL with localhost (or vice versa). Both resolve only
+    // to the local machine, so accept either loopback hostname when scheme
+    // and port match. Never accept a remote host or a different local port.
+    return requestIsHttp && originIsHttp && originIsLoopback &&
+      originUrl.protocol === requestUrl.protocol && originUrl.port === requestUrl.port &&
+      !originUrl.username && !originUrl.password && !originUrl.pathname.replace(/^\/$/, "") &&
+      !originUrl.search && !originUrl.hash;
   } catch {
     return false;
   }

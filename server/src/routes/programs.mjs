@@ -1,19 +1,26 @@
 import path from "node:path";
 import { buildProgramCandidates, getProgramCandidateSearchTerms } from "../services/programAnalysis.mjs";
 import { discoverInstalledPrograms } from "../services/programDiscovery.mjs";
-import { buildProgramStorageRows } from "../services/storageAdvisor.mjs";
 
 export function registerProgramRoutes(app, db) {
   app.get("/api/programs", async (request, reply) => {
     try {
       const discoveredPrograms = await discoverInstalledPrograms();
-      const sizedPrograms = await buildProgramStorageRows(db, discoveredPrograms);
-      // Keep uninstall metadata required by Program Cleanup while exposing
-      // accurate indexed sizes (or explicitly labelled package/registry estimates).
-      const keyOf = (program) => [program.name, program.version, program.publisher]
-        .map((value) => String(value || "").trim().toLowerCase()).join("|");
-      const details = new Map(discoveredPrograms.map((program) => [keyOf(program), program]));
-      const programs = sizedPrograms.map((row) => ({ ...(details.get(keyOf(row)) || {}), ...row }));
+      // The list view only needs installed-program metadata. Previously this
+      // endpoint ran one SQLite prefix aggregation per installed application,
+      // which could block the UI for tens of seconds on large indexes. Keep the
+      // registry/package estimate here and calculate indexed evidence only for
+      // the specific program when the user requests analysis.
+      const programs = discoveredPrograms.map((program) => {
+        const estimatedSizeKB = Number(program.estimatedSizeKB) || 0;
+        return {
+          ...program,
+          size: estimatedSizeKB * 1024,
+          fileCount: 0,
+          estimatedSizeKB,
+          sizeBasis: estimatedSizeKB > 0 ? "package-manager-or-registry-estimate" : "not-available",
+        };
+      });
       programs.sort((a, b) => (Number(b.size) - Number(a.size)) || a.name.localeCompare(b.name));
       return { programs, count: programs.length };
     } catch (error) {

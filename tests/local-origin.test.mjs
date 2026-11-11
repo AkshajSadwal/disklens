@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { installDiskLensOriginPolicy, isAllowedDiskLensOrigin } from "../server/src/security/localOrigin.mjs";
+import { isTrustedLocalProxyRequest } from "../frontend/lib/localApiProxy.mjs";
 import { buildFrontendDevArgs } from "../scripts/frontendCommand.mjs";
 
 const require = createRequire(new URL("../server/package.json", import.meta.url));
@@ -51,4 +52,19 @@ test("launcher and direct frontend commands bind Next.js to loopback", async () 
   const packageJson = JSON.parse(await readFile(new URL("../frontend/package.json", import.meta.url), "utf8"));
   assert.match(packageJson.scripts.dev, /(?:-H|--hostname)\s+127\.0\.0\.1/);
   assert.match(packageJson.scripts.start, /(?:-H|--hostname)\s+127\.0\.0\.1/);
+});
+
+
+test("frontend API proxy accepts localhost and 127.0.0.1 aliases on the same local port", () => {
+  const request = (url, origin, method = "POST") => new Request(url, {
+    method,
+    headers: origin ? { origin } : {},
+  });
+
+  assert.equal(isTrustedLocalProxyRequest(request("http://127.0.0.1:3000/api/ai/status", "http://localhost:3000")), true);
+  assert.equal(isTrustedLocalProxyRequest(request("http://localhost:3000/api/ai/status", "http://127.0.0.1:3000")), true);
+  assert.equal(isTrustedLocalProxyRequest(request("http://127.0.0.1:3000/api/ai/status", "http://localhost:3001")), false);
+  assert.equal(isTrustedLocalProxyRequest(request("http://127.0.0.1:3000/api/ai/status", "https://localhost:3000")), false);
+  assert.equal(isTrustedLocalProxyRequest(request("http://127.0.0.1:3000/api/ai/status", "https://attacker.example")), false);
+  assert.equal(isTrustedLocalProxyRequest(request("http://127.0.0.1:3000/api/ai/status", "null")), false);
 });

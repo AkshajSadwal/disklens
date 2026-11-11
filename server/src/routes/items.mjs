@@ -1,5 +1,5 @@
 import path from "node:path";
-export function registerItemRoutes(app, db) {
+export function registerItemRoutes(app, db, { platform = process.platform } = {}) {
   app.get("/api/items", async (request) => {
     const page = Math.max(Number(request.query?.page) || 1, 1);
     const limit = Math.min(Number(request.query?.limit) || 100, 500);
@@ -89,20 +89,18 @@ export function registerItemRoutes(app, db) {
     }
 
     if (item.type === "directory") {
-      const stats = db
-        .prepare(`
-          SELECT
-            COALESCE(SUM(CASE WHEN type = 'file' THEN size ELSE 0 END), 0) AS totalSize,
-            COUNT(CASE WHEN type = 'file' THEN 1 END) AS fileCount,
-            COUNT(CASE WHEN type = 'directory' THEN 1 END) - 1 AS folderCount
-          FROM items
-          WHERE path = ? OR substr(path, 1, length(?)) = ?
-        `)
-        .get(
-          item.path,
-          item.path.endsWith(path.sep) ? item.path : `${item.path}${path.sep}`,
-          item.path.endsWith(path.sep) ? item.path : `${item.path}${path.sep}`,
-        );
+      const pathApi = platform === "win32" ? path.win32 : path.posix;
+      const prefix = item.path.endsWith(pathApi.sep) ? item.path : `${item.path}${pathApi.sep}`;
+      const upperBound = `${prefix.slice(0, -1)}${String.fromCharCode(prefix.charCodeAt(prefix.length - 1) + 1)}`;
+      const collation = platform === "win32" ? " COLLATE NOCASE" : "";
+      const stats = db.prepare(`
+        SELECT
+          COALESCE(SUM(CASE WHEN type = 'file' THEN size ELSE 0 END), 0) AS totalSize,
+          COUNT(CASE WHEN type = 'file' THEN 1 END) AS fileCount,
+          COUNT(CASE WHEN type = 'directory' THEN 1 END) AS folderCount
+        FROM items
+        WHERE path > ?${collation} AND path < ?${collation}
+      `).get(prefix, upperBound);
 
       return {
         ...item,

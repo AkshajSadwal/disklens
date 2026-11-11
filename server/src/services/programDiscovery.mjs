@@ -117,9 +117,39 @@ async function discoverLinuxPrograms() {
   return programs;
 }
 
-export async function discoverInstalledPrograms() {
-  if (process.platform === "win32") return discoverWindowsPrograms();
-  if (process.platform === "darwin") return discoverMacPrograms();
-  if (process.platform === "linux") return discoverLinuxPrograms();
-  return [];
+const PROGRAM_DISCOVERY_CACHE_MS = 5 * 60 * 1000;
+let cachedPrograms = null;
+let cachedProgramsAt = 0;
+let discoveryInFlight = null;
+
+/** Clear the in-process registry/package-manager snapshot after an explicit refresh. */
+export function invalidateInstalledProgramsCache() {
+  cachedPrograms = null;
+  cachedProgramsAt = 0;
+}
+
+export async function discoverInstalledPrograms({ forceRefresh = false } = {}) {
+  const now = Date.now();
+  if (!forceRefresh && cachedPrograms && now - cachedProgramsAt < PROGRAM_DISCOVERY_CACHE_MS) {
+    return cachedPrograms.map((program) => ({ ...program }));
+  }
+  if (discoveryInFlight) {
+    const programs = await discoveryInFlight;
+    return programs.map((program) => ({ ...program }));
+  }
+
+  discoveryInFlight = (async () => {
+    if (process.platform === "win32") return discoverWindowsPrograms();
+    if (process.platform === "darwin") return discoverMacPrograms();
+    if (process.platform === "linux") return discoverLinuxPrograms();
+    return [];
+  })();
+
+  try {
+    cachedPrograms = await discoveryInFlight;
+    cachedProgramsAt = Date.now();
+    return cachedPrograms.map((program) => ({ ...program }));
+  } finally {
+    discoveryInFlight = null;
+  }
 }
