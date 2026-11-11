@@ -35,6 +35,7 @@ export default function StorageExplorerView({
   onOpenFolder,
 }) {
   const [search, setSearch] = useState({ q: "", qField: "name", extension: "", type: "all", minSize: "", maxSize: "", modifiedAfter: "", modifiedBefore: "", sort: "name", order: "asc" });
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [searchResults, setSearchResults] = useState(null);
   const [searchPage, setSearchPage] = useState(1);
   const [searchPagination, setSearchPagination] = useState(null);
@@ -45,6 +46,11 @@ export default function StorageExplorerView({
   const [exportBusy, setExportBusy] = useState(false);
   const [exportMessage, setExportMessage] = useState("");
   const isSearchMode = Boolean(search.q || search.extension || search.type !== "all" || search.minSize || search.maxSize || search.modifiedAfter || search.modifiedBefore);
+  const activeFilterCount = [
+    search.qField !== "name", search.extension, search.type !== "all", search.minSize,
+    search.maxSize, search.modifiedAfter, search.modifiedBefore, search.sort !== "name",
+    search.order !== "asc",
+  ].filter(Boolean).length;
 
   useEffect(() => {
     try {
@@ -221,29 +227,54 @@ export default function StorageExplorerView({
             </div>
           </div>
 
-          <div className="dl-explorer-filters" role="search" aria-label="Filter indexed storage">
-            <label><span>Search in</span><select value={search.qField} onChange={(event) => updateSearch("qField", event.target.value)}><option value="name">Name</option><option value="path">Path</option><option value="both">Name and path</option></select></label>
-            <label><span>{search.qField === "path" ? "Path prefix" : search.qField === "both" ? "Name or path prefix" : "Name starts with"}</span><input type="search" value={search.q} onChange={(event) => updateSearch("q", event.target.value)} placeholder={search.qField === "path" ? currentPath : "Search files and folders"} /></label>
-            <label><span>Extension</span><input value={search.extension} onChange={(event) => updateSearch("extension", event.target.value)} placeholder=".pdf" /></label>
-            <label><span>Kind</span><select value={search.type} onChange={(event) => updateSearch("type", event.target.value)}><option value="all">All</option><option value="file">Files</option><option value="folder">Folders</option></select></label>
-            <label><span>Min size (MB)</span><input type="number" min="0" value={search.minSize} onChange={(event) => updateSearch("minSize", event.target.value)} /></label>
-            <label><span>Max size (MB)</span><input type="number" min="0" value={search.maxSize} onChange={(event) => updateSearch("maxSize", event.target.value)} /></label>
-            <label><span>Modified after</span><input type="date" value={search.modifiedAfter} onChange={(event) => updateSearch("modifiedAfter", event.target.value)} /></label>
-            <label><span>Modified before</span><input type="date" value={search.modifiedBefore} onChange={(event) => updateSearch("modifiedBefore", event.target.value)} /></label>
-            <label><span>Sort by</span><select value={search.sort} onChange={(event) => updateSearch("sort", event.target.value)}><option value="name">Name</option><option value="size">Size</option><option value="modified">Modified</option><option value="type">Type</option></select></label>
-            <label><span>Order</span><select value={search.order} onChange={(event) => updateSearch("order", event.target.value)}><option value="asc">Ascending</option><option value="desc">Descending</option></select></label>
-            {isSearchMode && <button type="button" onClick={clearSearch}>Clear filters</button>}
+          <div className="dl-explorer-toolbar" role="search" aria-label="Search indexed storage">
+            <label className="dl-explorer-search">
+              <Icon name="search" size={16} />
+              <input
+                type="search"
+                value={search.q}
+                onChange={(event) => updateSearch("q", event.target.value)}
+                placeholder={search.qField === "path" ? `Search in ${currentPath}` : "Search files and folders"}
+                aria-label="Search files and folders"
+              />
+              {search.q && <button type="button" onClick={() => updateSearch("q", "")} aria-label="Clear search">×</button>}
+            </label>
+            <button
+              type="button"
+              className={`dl-filter-toggle ${filtersOpen || activeFilterCount ? "is-active" : ""}`}
+              onClick={() => setFiltersOpen((open) => !open)}
+              aria-expanded={filtersOpen}
+              aria-controls="dl-explorer-advanced-filters"
+            >
+              <Icon name="filter" size={15} />
+              Filters{activeFilterCount > 0 ? ` · ${activeFilterCount}` : ""}
+            </button>
+            {isSearchMode && <button type="button" className="dl-filter-clear" onClick={clearSearch}>Clear</button>}
           </div>
-          <div className="dl-explorer-saved-filters">
-            <label><span>Saved filters</span><select defaultValue="" onChange={(event) => {
-              const preset = savedFilters.find((item) => item.id === event.target.value);
-              if (preset) { setSearch(preset.search); setSearchPage(1); setExportMessage(`Applied “${preset.name}”.`); }
-              event.target.value = "";
-            }}><option value="">Choose a saved filter</option>{savedFilters.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
-            {savedFilters.map((item) => <button type="button" key={`remove-${item.id}`} title={`Remove ${item.name}`} aria-label={`Remove saved filter ${item.name}`} onClick={() => removeSavedFilter(item.id)}>× {item.name}</button>)}
-            <input aria-label="Saved filter name" value={filterName} onChange={(event) => setFilterName(event.target.value)} maxLength={60} placeholder="Name current filters" />
-            <button type="button" onClick={saveCurrentFilter}>Save current filter</button>
-            <button type="button" onClick={exportCsv} disabled={!isSearchMode || exportBusy}>{exportBusy ? "Exporting…" : "Export CSV (up to 10,000)"}</button>
+
+          <div className="dl-explorer-advanced" id="dl-explorer-advanced-filters" hidden={!filtersOpen}>
+              <div className="dl-explorer-filters" aria-label="Advanced filters">
+                <label><span>Search in</span><select value={search.qField} onChange={(event) => updateSearch("qField", event.target.value)}><option value="name">Name</option><option value="path">Path</option><option value="both">Name and path</option></select></label>
+                <label><span>Extension</span><input value={search.extension} onChange={(event) => updateSearch("extension", event.target.value)} placeholder=".pdf" /></label>
+                <label><span>Kind</span><select value={search.type} onChange={(event) => updateSearch("type", event.target.value)}><option value="all">All</option><option value="file">Files</option><option value="folder">Folders</option></select></label>
+                <label><span>Min size (MB)</span><input type="number" min="0" value={search.minSize} onChange={(event) => updateSearch("minSize", event.target.value)} /></label>
+                <label><span>Max size (MB)</span><input type="number" min="0" value={search.maxSize} onChange={(event) => updateSearch("maxSize", event.target.value)} /></label>
+                <label><span>Modified after</span><input type="date" value={search.modifiedAfter} onChange={(event) => updateSearch("modifiedAfter", event.target.value)} /></label>
+                <label><span>Modified before</span><input type="date" value={search.modifiedBefore} onChange={(event) => updateSearch("modifiedBefore", event.target.value)} /></label>
+                <label><span>Sort by</span><select value={search.sort} onChange={(event) => updateSearch("sort", event.target.value)}><option value="name">Name</option><option value="size">Size</option><option value="modified">Modified</option><option value="type">Type</option></select></label>
+                <label><span>Order</span><select value={search.order} onChange={(event) => updateSearch("order", event.target.value)}><option value="asc">Ascending</option><option value="desc">Descending</option></select></label>
+              </div>
+              <div className="dl-explorer-saved-filters">
+                <label><span>Saved filters</span><select defaultValue="" onChange={(event) => {
+                  const preset = savedFilters.find((item) => item.id === event.target.value);
+                  if (preset) { setSearch(preset.search); setSearchPage(1); setExportMessage(`Applied “${preset.name}”.`); }
+                  event.target.value = "";
+                }}><option value="">Choose a saved filter</option>{savedFilters.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+                {savedFilters.map((item) => <button type="button" key={`remove-${item.id}`} title={`Remove ${item.name}`} aria-label={`Remove saved filter ${item.name}`} onClick={() => removeSavedFilter(item.id)}>× {item.name}</button>)}
+                <input aria-label="Saved filter name" value={filterName} onChange={(event) => setFilterName(event.target.value)} maxLength={60} placeholder="Name current filters" />
+                <button type="button" onClick={saveCurrentFilter}>Save current filter</button>
+                <button type="button" onClick={exportCsv} disabled={!isSearchMode || exportBusy}>{exportBusy ? "Exporting…" : "Export CSV (up to 10,000)"}</button>
+              </div>
           </div>
           {exportMessage && <div className="dl-explorer-result-count" role="status">{exportMessage}</div>}
           {searchError && <div className="dl-alert" role="alert">{searchError}</div>}

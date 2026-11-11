@@ -19,6 +19,7 @@ function priorityClass(priority) {
 
 export default function AiStoragePanel({ onClose, embedded = false }) {
   const [status, setStatus] = useState(null);
+  const [statusNotice, setStatusNotice] = useState("");
   const [statusError, setStatusError] = useState("");
   const [mode, setMode] = useState("top");
   const [limit, setLimit] = useState(10);
@@ -46,7 +47,7 @@ export default function AiStoragePanel({ onClose, embedded = false }) {
         ]);
         const statusData = await statusResponse.json().catch(() => null);
         setStatus(statusData);
-        if (statusData?.mode === "offline") setStatusError("Using local rule-based analysis. No AI provider key is configured.");
+        if (statusData?.mode === "offline") setStatusNotice("Local analysis is ready. Configure a hosted provider in Settings only if you want external AI features.");
         if (programsResponse.ok) {
           const data = await programsResponse.json().catch(() => null);
           setPrograms(data?.programs || []);
@@ -263,7 +264,7 @@ export default function AiStoragePanel({ onClose, embedded = false }) {
             <p>Review storage usage and recommendations.</p>
           </div>
           <div className="dl-ai-head-right">
-            <div className="dl-ai-status"><span className={`dl-live-dot ${status?.configured ? "" : "is-off"}`} />{status?.mode === "offline" ? "Local Rules" : status?.configured ? "AI Ready" : "Checking"}</div>
+            <div className="dl-ai-status"><span className={`dl-live-dot ${status?.configured ? "" : "is-off"}`} />{status?.mode === "offline" ? "Local analysis" : status?.configured ? "AI Ready" : "Checking"}</div>
             <button className="dl-icon-btn" onClick={onClose} title="Close"><Icon name="close" size={16} /></button>
           </div>
         </header>
@@ -282,7 +283,8 @@ export default function AiStoragePanel({ onClose, embedded = false }) {
         </div>
 
         <div className="dl-ai-body">
-          {statusError && <div className="dl-alert">{statusError}</div>}
+          {statusNotice && <div className="dl-info-banner" role="status">{statusNotice}</div>}
+          {statusError && <div className="dl-alert" role="alert">{statusError}</div>}
 
           {mode === "top" ? (
             <div className="dl-ai-config">

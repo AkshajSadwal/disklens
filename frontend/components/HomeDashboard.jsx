@@ -303,65 +303,65 @@ export default function HomeDashboard({
         </div>
       </div>
 
+      <section className="dl-home-stat-grid">
+        <div className="dl-home-stat-card blue">
+          <div className="dl-home-stat-icon">
+            <Icon name="storage" size={21} />
+          </div>
+          <div>
+            <span>Total Storage</span>
+            <strong>{hasDriveMetadata ? formatBytes(total) : "—"}</strong>
+            <small>
+              {hasDriveMetadata
+                ? "All indexed drives"
+                : "Drive capacity not available"}
+            </small>
+          </div>
+        </div>
+
+        <div className="dl-home-stat-card red">
+          <div className="dl-home-stat-icon">
+            <div
+              className="dl-home-mini-ring used"
+              style={{
+                background: `conic-gradient(#e64c63 0 ${total ? (used / total) * 100 : 0}%, #f7dce2 0 100%)`,
+              }}
+            />
+          </div>
+          <div>
+            <span>Used</span>
+            <strong>{hasDriveMetadata ? formatBytes(used) : "—"}</strong>
+            <small>
+              {hasDriveMetadata && total
+                ? `${((used / total) * 100).toFixed(0)}% of total`
+                : "Waiting for drive data"}
+            </small>
+          </div>
+        </div>
+
+        <div className="dl-home-stat-card neutral">
+          <div className="dl-home-stat-icon">
+            <div
+              className="dl-home-mini-ring free"
+              style={{
+                background: `conic-gradient(#98a3b2 0 ${total ? (free / total) * 100 : 0}%, #e8edf2 0 100%)`,
+              }}
+            />
+          </div>
+          <div>
+            <span>Free</span>
+            <strong>{hasDriveMetadata ? formatBytes(free) : "—"}</strong>
+            <small>
+              {hasDriveMetadata && total
+                ? `${((free / total) * 100).toFixed(0)}% available`
+                : "Waiting for drive data"}
+            </small>
+          </div>
+        </div>
+      </section>
+
       <div className="dl-home-top-grid">
         <div className="dl-home-main-column">
-          <section className="dl-home-stat-grid">
-            <div className="dl-home-stat-card blue">
-              <div className="dl-home-stat-icon">
-                <Icon name="storage" size={21} />
-              </div>
-              <div>
-                <span>Total Storage</span>
-                <strong>{hasDriveMetadata ? formatBytes(total) : "—"}</strong>
-                <small>
-                  {hasDriveMetadata
-                    ? "All indexed drives"
-                    : "Drive capacity not available"}
-                </small>
-              </div>
-            </div>
-
-            <div className="dl-home-stat-card red">
-              <div className="dl-home-stat-icon">
-                <div
-                  className="dl-home-mini-ring used"
-                  style={{
-                    background: `conic-gradient(#e64c63 0 ${total ? (used / total) * 100 : 0}%, #f7dce2 0 100%)`,
-                  }}
-                />
-              </div>
-              <div>
-                <span>Used</span>
-                <strong>{hasDriveMetadata ? formatBytes(used) : "—"}</strong>
-                <small>
-                  {hasDriveMetadata && total
-                    ? `${((used / total) * 100).toFixed(0)}% of total`
-                    : "Waiting for drive data"}
-                </small>
-              </div>
-            </div>
-
-            <div className="dl-home-stat-card neutral">
-              <div className="dl-home-stat-icon">
-                <div
-                  className="dl-home-mini-ring free"
-                  style={{
-                    background: `conic-gradient(#98a3b2 0 ${total ? (free / total) * 100 : 0}%, #e8edf2 0 100%)`,
-                  }}
-                />
-              </div>
-              <div>
-                <span>Free</span>
-                <strong>{hasDriveMetadata ? formatBytes(free) : "—"}</strong>
-                <small>
-                  {hasDriveMetadata && total
-                    ? `${((free / total) * 100).toFixed(0)}% available`
-                    : "Waiting for drive data"}
-                </small>
-              </div>
-            </div>
-          </section>
-
           <section className="dl-home-panel">
             <div className="dl-home-panel-head">
               <div>

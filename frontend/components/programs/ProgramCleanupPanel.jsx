@@ -46,6 +46,14 @@ export default function ProgramCleanupPanel({ onClose, onReviewDelete, embedded 
     loadPrograms();
   }, []);
 
+  useEffect(() => {
+    // Show a useful first item by default instead of leaving the detail pane empty.
+    // This analyzes only one program; the full installed-program list stays lightweight.
+    if (!loading && !selectedProgram && programs.length > 0) {
+      analyzeProgram(programs[0]);
+    }
+  }, [loading, programs, selectedProgram]);
+
   const filteredPrograms = useMemo(() => {
     const q = programQuery.trim().toLowerCase();
     if (!q) return programs;

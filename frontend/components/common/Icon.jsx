@@ -11,6 +11,7 @@ export default function Icon({ name, size = 18, strokeWidth = 1.8 }) {
     folder: <><path d="M2.8 6.2a1.7 1.7 0 0 1 1.7-1.7h4l1.5 1.8h5.5a1.7 1.7 0 0 1 1.7 1.7v5.8a1.7 1.7 0 0 1-1.7 1.7H4.5a1.7 1.7 0 0 1-1.7-1.7z"/></>,
     file: <><path d="M5 2.8h6l4 4v10.4H5z"/><path d="M11 2.8v4h4M7.2 11h5.6M7.2 14h4"/></>,
     search: <><circle cx="8.5" cy="8.5" r="4.5"/><path d="m12 12 4 4"/></>,
+    filter: <><path d="M3 4h14l-5.3 6.1v4.5l-3.4 1.7v-6.2z"/></>,
     info: <><circle cx="10" cy="10" r="7"/><path d="M10 9v4M10 6.5h.01"/></>,
     arrowLeft: <><path d="M12.5 5 7.5 10l5 5"/></>,
     arrowRight: <><path d="m7.5 5 5 5-5 5"/></>,
